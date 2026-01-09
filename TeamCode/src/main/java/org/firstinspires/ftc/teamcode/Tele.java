@@ -88,6 +88,8 @@ public class Tele extends OpMode {
     private boolean distanceCheckPassed = false; // Tracks if ball was detected at 3000ms
     private boolean kickLeft = false; // Track if left side should be kicked
     private boolean kickRight = false; // Track if right side should be kicked
+    private boolean singleBallMode = false; // True if proximity > 6.5 (only one ball)
+    private boolean trapdoorsOpenedForSingleBall = false; // Track if trapdoors were opened in single ball mode
 
     // Debug timing
     private ElapsedTime debugTimer = new ElapsedTime();
@@ -236,8 +238,8 @@ public class Tele extends OpMode {
                 leftTrapdoor.setPosition(0.0);
                 rightTrapdoor.setPosition(0.0);
             } else {
-                leftTrapdoor.setPosition(0.2);
-                rightTrapdoor.setPosition(0.0);
+                leftTrapdoor.setPosition(0.1);
+                rightTrapdoor.setPosition(0.1);
             }
         }
         lastGamepad2XState = gamepad2.x;
@@ -249,8 +251,8 @@ public class Tele extends OpMode {
                 rightTrapdoor.setPosition(0.2);
                 leftTrapdoor.setPosition(0.2);
             } else {
-                rightTrapdoor.setPosition(0.0);
-                leftTrapdoor.setPosition(0.2);
+                rightTrapdoor.setPosition(0.1);
+                leftTrapdoor.setPosition(0.1);
             }
         }
         lastGamepad2BState = gamepad2.b;
@@ -264,8 +266,8 @@ public class Tele extends OpMode {
                 leftTrapdoorOpen = true;
                 rightTrapdoorOpen = true;
             } else {
-                leftTrapdoor.setPosition(0.2);
-                rightTrapdoor.setPosition(0.0);
+                rightTrapdoor.setPosition(0.1);
+                leftTrapdoor.setPosition(0.1);
                 leftTrapdoorOpen = false;
                 rightTrapdoorOpen = false;
             }
@@ -300,18 +302,24 @@ public class Tele extends OpMode {
         }
         lastDpadRightState = gamepad2.dpad_right;
 
-        // --- Bumpers: Color Selection ---
-        // Left Bumper: Select Color: PURPLE
+        // --- Bumpers: Color Selection + Auto Shoot ---
+        // Left Bumper: Select Color: PURPLE and start auto shoot
         if (gamepad2.left_bumper && !lastGamepad2LeftBumperState) {
             colorPurpleSelected = true;
             colorGreenSelected = false;
+            if (!shootSequenceActive) {
+                startShootSequence();
+            }
         }
         lastGamepad2LeftBumperState = gamepad2.left_bumper;
 
-        // Right Bumper: Select Color: GREEN
+        // Right Bumper: Select Color: GREEN and start auto shoot
         if (gamepad2.right_bumper && !lastGamepad2RightBumperState) {
             colorGreenSelected = true;
             colorPurpleSelected = false;
+            if (!shootSequenceActive) {
+                startShootSequence();
+            }
         }
         lastGamepad2RightBumperState = gamepad2.right_bumper;
 
@@ -330,13 +338,14 @@ public class Tele extends OpMode {
             shooter.setPower(0.0);
         }
 
-        // Right Trigger: Auto shoot (toggle - press to start, press again to stop)
+        // Right Trigger: Backup auto shoot (always left trapdoor/kicker arm, independent of color)
+        // Also stops active sequence if pressed during one
         boolean rightTriggerPressed = gamepad2.right_trigger > 0.5;
         if (rightTriggerPressed && !lastGamepad2RightTriggerState) {
             if (shootSequenceActive) {
                 stopShootSequence();
             } else {
-                startShootSequence();
+                startBackupShootSequence();
             }
         }
         lastGamepad2RightTriggerState = rightTriggerPressed;
@@ -390,6 +399,12 @@ public class Tele extends OpMode {
         Color.RGBToHSV(colorSensorLeft.red(), colorSensorLeft.green(), colorSensorLeft.blue(), leftHSV);
         Color.RGBToHSV(colorSensorRight.red(), colorSensorRight.green(), colorSensorRight.blue(), rightHSV);
 
+        // Check proximity sensors to determine if single ball mode
+        double leftProximity = ((DistanceSensor) colorSensorLeft).getDistance(DistanceUnit.CM);
+        double rightProximity = ((DistanceSensor) colorSensorRight).getDistance(DistanceUnit.CM);
+        singleBallMode = (leftProximity > 6.5 || rightProximity > 6.5);
+        trapdoorsOpenedForSingleBall = false;
+
         // Determine colors (Purple if hue > 175, otherwise Green)
         boolean leftIsPurple = leftHSV[0] > 175;
         boolean leftIsGreen = !leftIsPurple;
@@ -408,26 +423,72 @@ public class Tele extends OpMode {
             if (rightIsGreen) openRight = true;
         }
 
-        // Track which kicker arms should activate
-        kickLeft = openLeft;
-        kickRight = openRight;
-
-        // Set trapdoors based on determination using existing button logic patterns
+        // Track which kicker arms should activate (only used if not single ball mode)
+        // If both balls are the same color, prioritize left
         if (openLeft && openRight) {
-            // Both Trapdoors Open logic (matches Y button)
-            leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.2);
-        } else if (openLeft) {
-            // Left Trapdoor Open logic (matches X button)
-            leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.0);
-        } else if (openRight) {
-            // Right Trapdoor Open logic (matches B button)
-            rightTrapdoor.setPosition(0.2);
-            leftTrapdoor.setPosition(0.2);
+            kickLeft = true;
+            kickRight = false;
         } else {
-            // No match, ensure closed
-            leftTrapdoor.setPosition(0.2);
+            kickLeft = openLeft;
+            kickRight = openRight;
+        }
+
+        if (singleBallMode) {
+            // Single ball mode: stop intake, open both trapdoors
+            intake.setPower(0.0);
+            leftTrapdoor.setPosition(0.0);
+            rightTrapdoor.setPosition(0.2);
+        } else {
+            // Normal mode: Set trapdoors based on determination using existing button logic patterns
+            if (openLeft && openRight) {
+                // Both Trapdoors Open logic (matches Y button)
+                leftTrapdoor.setPosition(0.0);
+                rightTrapdoor.setPosition(0.2);
+            } else if (openLeft) {
+                // Left Trapdoor Open logic (matches X button)
+                leftTrapdoor.setPosition(0.0);
+                rightTrapdoor.setPosition(0.0);
+            } else if (openRight) {
+                // Right Trapdoor Open logic (matches B button)
+                rightTrapdoor.setPosition(0.2);
+                leftTrapdoor.setPosition(0.2);
+            } else {
+                // No match, ensure closed
+                leftTrapdoor.setPosition(0.2);
+                rightTrapdoor.setPosition(0.0);
+            }
+        }
+
+        // Immediate servo actions
+        leftTransfer.setPosition(0.0);
+        rightTransfer.setPosition(0.5);
+    }
+
+    private void startBackupShootSequence() {
+        // Backup shoot sequence: always use left trapdoor and left kicker arm
+        // Independent of color detection
+        shootSequenceActive = true;
+        shootSequenceTimer.reset();
+        distanceCheckPassed = false;
+
+        // Check proximity sensors to determine if single ball mode
+        double leftProximity = ((DistanceSensor) colorSensorLeft).getDistance(DistanceUnit.CM);
+        double rightProximity = ((DistanceSensor) colorSensorRight).getDistance(DistanceUnit.CM);
+        singleBallMode = (leftProximity > 6.5 || rightProximity > 6.5);
+        trapdoorsOpenedForSingleBall = false;
+
+        // Always use left side
+        kickLeft = true;
+        kickRight = false;
+
+        if (singleBallMode) {
+            // Single ball mode: stop intake, open both trapdoors
+            intake.setPower(0.0);
+            leftTrapdoor.setPosition(0.0);
+            rightTrapdoor.setPosition(0.2);
+        } else {
+            // Always open left trapdoor (matches X button logic)
+            leftTrapdoor.setPosition(0.0);
             rightTrapdoor.setPosition(0.0);
         }
 
@@ -440,22 +501,39 @@ public class Tele extends OpMode {
         // Keep shooter running throughout the sequence
         shooter.setPower(0.5);
 
-        // Intake runs for first 900ms, pauses 900-1000ms, then resumes until end
-        if (shootSequenceTimer.milliseconds() < 900) {
-            intake.setPower(-1.0);
-        } else if (shootSequenceTimer.milliseconds() < 1400) {
-            intake.setPower(0.0);
-        } else {
-            intake.setPower(-1.0);
-        }
-
-        // After 500ms delay, set the kicker arm position (only for the side with the ball)
-        if (shootSequenceTimer.milliseconds() >= 500) {
-            if (kickLeft) {
-                leftKickerArm.setPosition(0.5);
+        if (singleBallMode) {
+            // Single ball mode: intake stopped at start, resume after 300ms
+            if (shootSequenceTimer.milliseconds() < 300) {
+                intake.setPower(0.0);
+            } else {
+                // After 300ms, resume intake
+                if (shootSequenceTimer.milliseconds() < 900 + 300) {
+                    intake.setPower(-1.0);
+                } else if (shootSequenceTimer.milliseconds() < 1400 + 300) {
+                    intake.setPower(0.0);
+                } else {
+                    intake.setPower(-1.0);
+                }
             }
-            if (kickRight) {
-                rightKickerArm.setPosition(0.075);
+            // Do NOT activate kicker arms in single ball mode
+        } else {
+            // Normal mode: Intake runs for first 900ms, pauses 900-1400ms, then resumes until end
+            if (shootSequenceTimer.milliseconds() < 900) {
+                intake.setPower(-1.0);
+            } else if (shootSequenceTimer.milliseconds() < 1400) {
+                intake.setPower(0.0);
+            } else {
+                intake.setPower(-1.0);
+            }
+
+            // After 500ms delay, set the kicker arm position (only for the side with the ball)
+            if (shootSequenceTimer.milliseconds() >= 500) {
+                if (kickLeft) {
+                    leftKickerArm.setPosition(0.5);
+                }
+                if (kickRight) {
+                    rightKickerArm.setPosition(0.075);
+                }
             }
         }
 
@@ -480,8 +558,8 @@ public class Tele extends OpMode {
 
         // End the sequence and reset positions (e.g., after 4000ms)
         if (shootSequenceTimer.milliseconds() >= 4500) {
-            leftTrapdoor.setPosition(0.2);
-            rightTrapdoor.setPosition(0.0);
+            rightTrapdoor.setPosition(0.1);
+            leftTrapdoor.setPosition(0.1);
             leftKickerArm.setPosition(0.0);
             rightKickerArm.setPosition(0.5);
             rightTransfer.setPosition(0.5);
@@ -502,6 +580,8 @@ public class Tele extends OpMode {
             distanceCheckPassed = false;
             kickLeft = false;
             kickRight = false;
+            singleBallMode = false;
+            trapdoorsOpenedForSingleBall = false;
         }
     }
 
@@ -511,6 +591,8 @@ public class Tele extends OpMode {
         distanceCheckPassed = false;
         kickLeft = false;
         kickRight = false;
+        singleBallMode = false;
+        trapdoorsOpenedForSingleBall = false;
 
         // Reset servos to closed positions
         leftTrapdoor.setPosition(0.2);
@@ -560,9 +642,14 @@ public class Tele extends OpMode {
             if (rightIsGreen) openRight = true;
         }
 
-        // Update which kicker arms should activate
-        kickLeft = openLeft;
-        kickRight = openRight;
+        // Update which kicker arms should activate (prioritize left if both same color)
+        if (openLeft && openRight) {
+            kickLeft = true;
+            kickRight = false;
+        } else {
+            kickLeft = openLeft;
+            kickRight = openRight;
+        }
 
         if (openLeft && openRight) {
             leftTrapdoor.setPosition(0.0);
