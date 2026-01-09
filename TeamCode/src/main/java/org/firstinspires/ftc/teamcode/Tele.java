@@ -14,6 +14,7 @@ import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+import com.qualcomm.robotcore.hardware.DistanceSensor;
 
 
 @com.qualcomm.robotcore.eventloop.opmode.TeleOp (name = "Tele")
@@ -37,6 +38,7 @@ public class Tele extends OpMode {
     protected ColorSensor colorSensorRight;
     protected ColorSensor colorSensorLeft;
     protected IMU imu;
+    protected DistanceSensor distanceSensor;
 
     // ========== CONTROLLER 1 (DRIVER) STATE ==========
     // Intake toggle state (Right Bumper)
@@ -83,6 +85,9 @@ public class Tele extends OpMode {
     // Timer for shooting sequence
     private ElapsedTime shootSequenceTimer = new ElapsedTime();
     private boolean shootSequenceActive = false;
+    private boolean distanceCheckPassed = false; // Tracks if ball was detected at 3000ms
+    private boolean kickLeft = false; // Track if left side should be kicked
+    private boolean kickRight = false; // Track if right side should be kicked
 
     // Debug timing
     private ElapsedTime debugTimer = new ElapsedTime();
@@ -115,6 +120,9 @@ public class Tele extends OpMode {
         // Initialize color sensors
         colorSensorRight = hardwareMap.get(ColorSensor.class, "colorSensorRight");
         colorSensorLeft = hardwareMap.get(ColorSensor.class, "colorSensorLeft");
+
+        // Get the distance sensor and motor from hardwareMap
+        distanceSensor = hardwareMap.get(DistanceSensor.class, "distanceSensor");
 
         // Initialize IMU for field-centric driving
         imu = hardwareMap.get(IMU.class, "imu");
@@ -226,8 +234,10 @@ public class Tele extends OpMode {
             leftTrapdoorOpen = !leftTrapdoorOpen;
             if (leftTrapdoorOpen) {
                 leftTrapdoor.setPosition(0.0);
+                rightTrapdoor.setPosition(0.0);
             } else {
-                leftTrapdoor.setPosition(0.1);
+                leftTrapdoor.setPosition(0.2);
+                rightTrapdoor.setPosition(0.0);
             }
         }
         lastGamepad2XState = gamepad2.x;
@@ -237,8 +247,10 @@ public class Tele extends OpMode {
             rightTrapdoorOpen = !rightTrapdoorOpen;
             if (rightTrapdoorOpen) {
                 rightTrapdoor.setPosition(0.2);
+                leftTrapdoor.setPosition(0.2);
             } else {
-                rightTrapdoor.setPosition(0.1);
+                rightTrapdoor.setPosition(0.0);
+                leftTrapdoor.setPosition(0.2);
             }
         }
         lastGamepad2BState = gamepad2.b;
@@ -252,8 +264,8 @@ public class Tele extends OpMode {
                 leftTrapdoorOpen = true;
                 rightTrapdoorOpen = true;
             } else {
-                leftTrapdoor.setPosition(0.1);
-                rightTrapdoor.setPosition(0.1);
+                leftTrapdoor.setPosition(0.2);
+                rightTrapdoor.setPosition(0.0);
                 leftTrapdoorOpen = false;
                 rightTrapdoorOpen = false;
             }
@@ -318,10 +330,14 @@ public class Tele extends OpMode {
             shooter.setPower(0.0);
         }
 
-        // Right Trigger: Auto shoot
+        // Right Trigger: Auto shoot (toggle - press to start, press again to stop)
         boolean rightTriggerPressed = gamepad2.right_trigger > 0.5;
-        if (rightTriggerPressed && !lastGamepad2RightTriggerState && !shootSequenceActive) {
-            startShootSequence();
+        if (rightTriggerPressed && !lastGamepad2RightTriggerState) {
+            if (shootSequenceActive) {
+                stopShootSequence();
+            } else {
+                startShootSequence();
+            }
         }
         lastGamepad2RightTriggerState = rightTriggerPressed;
 
@@ -342,6 +358,9 @@ public class Tele extends OpMode {
         telemetry.addData("Right Kicker Arm", rightKickerArmOpen ? "OPEN" : "CLOSED");
         telemetry.addData("Shooter Speed", shooterSpeedOn ? "ON" : "OFF");
         telemetry.addData("Color Selected", colorPurpleSelected ? "PURPLE" : (colorGreenSelected ? "GREEN" : "NONE"));
+
+        // Distance Sensor Telemetry
+        telemetry.addData("Distance (cm)", "%.2f", distanceSensor.getDistance(DistanceUnit.CM));
 
         // Color sensor telemetry (HSV)
         float[] leftHSV = new float[3];
@@ -365,11 +384,56 @@ public class Tele extends OpMode {
         shootSequenceActive = true;
         shootSequenceTimer.reset();
 
+        // Color detection logic
+        float[] leftHSV = new float[3];
+        float[] rightHSV = new float[3];
+        Color.RGBToHSV(colorSensorLeft.red(), colorSensorLeft.green(), colorSensorLeft.blue(), leftHSV);
+        Color.RGBToHSV(colorSensorRight.red(), colorSensorRight.green(), colorSensorRight.blue(), rightHSV);
+
+        // Determine colors (Purple if hue > 175, otherwise Green)
+        boolean leftIsPurple = leftHSV[0] > 175;
+        boolean leftIsGreen = !leftIsPurple;
+        boolean rightIsPurple = rightHSV[0] > 175;
+        boolean rightIsGreen = !rightIsPurple;
+
+        boolean openLeft = false;
+        boolean openRight = false;
+
+        // Check against selected color logic
+        if (colorPurpleSelected) {
+            if (leftIsPurple) openLeft = true;
+            if (rightIsPurple) openRight = true;
+        } else if (colorGreenSelected) {
+            if (leftIsGreen) openLeft = true;
+            if (rightIsGreen) openRight = true;
+        }
+
+        // Track which kicker arms should activate
+        kickLeft = openLeft;
+        kickRight = openRight;
+
+        // Set trapdoors based on determination using existing button logic patterns
+        if (openLeft && openRight) {
+            // Both Trapdoors Open logic (matches Y button)
+            leftTrapdoor.setPosition(0.0);
+            rightTrapdoor.setPosition(0.2);
+        } else if (openLeft) {
+            // Left Trapdoor Open logic (matches X button)
+            leftTrapdoor.setPosition(0.0);
+            rightTrapdoor.setPosition(0.0);
+        } else if (openRight) {
+            // Right Trapdoor Open logic (matches B button)
+            rightTrapdoor.setPosition(0.2);
+            leftTrapdoor.setPosition(0.2);
+        } else {
+            // No match, ensure closed
+            leftTrapdoor.setPosition(0.2);
+            rightTrapdoor.setPosition(0.0);
+        }
+
         // Immediate servo actions
         leftTransfer.setPosition(0.0);
         rightTransfer.setPosition(0.5);
-        leftTrapdoor.setPosition(0.0);
-        rightTrapdoor.setPosition(0.0);
     }
 
     private void executeShootSequence() {
@@ -385,22 +449,41 @@ public class Tele extends OpMode {
             intake.setPower(-1.0);
         }
 
-        // After 500ms delay, set the kicker arm position
+        // After 500ms delay, set the kicker arm position (only for the side with the ball)
         if (shootSequenceTimer.milliseconds() >= 500) {
-            leftKickerArm.setPosition(0.5);
+            if (kickLeft) {
+                leftKickerArm.setPosition(0.5);
+            }
+            if (kickRight) {
+                rightKickerArm.setPosition(0.075);
+            }
         }
 
-        // After 3500ms, set the transfers
-        if (shootSequenceTimer.milliseconds() >= 3500) {
+        // At 3000ms, check distance sensor - if > 20cm, ball not in transfer, restart cycle
+        if (shootSequenceTimer.milliseconds() >= 3000 && !distanceCheckPassed) {
+            double distance = distanceSensor.getDistance(DistanceUnit.CM);
+            if (distance > 20) {
+                // Ball not detected, restart the cycle
+                restartShootSequence();
+                return;
+            } else {
+                // Ball detected, proceed with transfers
+                distanceCheckPassed = true;
+            }
+        }
+
+        // After 3500ms, set the transfers (only if distance check passed)
+        if (shootSequenceTimer.milliseconds() >= 3500 && distanceCheckPassed) {
             rightTransfer.setPosition(0.0);
             leftTransfer.setPosition(0.5);
         }
 
         // End the sequence and reset positions (e.g., after 4000ms)
         if (shootSequenceTimer.milliseconds() >= 4500) {
-            leftTrapdoor.setPosition(0.1);
-            rightTrapdoor.setPosition(0.1);
+            leftTrapdoor.setPosition(0.2);
+            rightTrapdoor.setPosition(0.0);
             leftKickerArm.setPosition(0.0);
+            rightKickerArm.setPosition(0.5);
             rightTransfer.setPosition(0.5);
             leftTransfer.setPosition(0.0);
 
@@ -412,10 +495,96 @@ public class Tele extends OpMode {
             rightTrapdoorOpen = false;
             bothTrapdoorsOpen = false;
             leftKickerArmOpen = false;
+            rightKickerArmOpen = false;
             transfersOpen = false;
 
             shootSequenceActive = false;
+            distanceCheckPassed = false;
+            kickLeft = false;
+            kickRight = false;
         }
+    }
+
+    private void stopShootSequence() {
+        // Stop the sequence and reset all mechanisms
+        shootSequenceActive = false;
+        distanceCheckPassed = false;
+        kickLeft = false;
+        kickRight = false;
+
+        // Reset servos to closed positions
+        leftTrapdoor.setPosition(0.2);
+        rightTrapdoor.setPosition(0.0);
+        leftKickerArm.setPosition(0.0);
+        rightKickerArm.setPosition(0.5);
+        rightTransfer.setPosition(0.5);
+        leftTransfer.setPosition(0.0);
+
+        // Stop motors
+        shooter.setPower(0.0);
+        intake.setPower(0.0);
+
+        // Reset state variables to match physical state
+        leftTrapdoorOpen = false;
+        rightTrapdoorOpen = false;
+        bothTrapdoorsOpen = false;
+        leftKickerArmOpen = false;
+        rightKickerArmOpen = false;
+        transfersOpen = false;
+    }
+
+    private void restartShootSequence() {
+        // Reset the timer to restart the cycle from the beginning
+        shootSequenceTimer.reset();
+        distanceCheckPassed = false;
+
+        // Re-run startShootSequence logic for color detection and trapdoors
+        float[] leftHSV = new float[3];
+        float[] rightHSV = new float[3];
+        Color.RGBToHSV(colorSensorLeft.red(), colorSensorLeft.green(), colorSensorLeft.blue(), leftHSV);
+        Color.RGBToHSV(colorSensorRight.red(), colorSensorRight.green(), colorSensorRight.blue(), rightHSV);
+
+        boolean leftIsPurple = leftHSV[0] > 175;
+        boolean leftIsGreen = !leftIsPurple;
+        boolean rightIsPurple = rightHSV[0] > 175;
+        boolean rightIsGreen = !rightIsPurple;
+
+        boolean openLeft = false;
+        boolean openRight = false;
+
+        if (colorPurpleSelected) {
+            if (leftIsPurple) openLeft = true;
+            if (rightIsPurple) openRight = true;
+        } else if (colorGreenSelected) {
+            if (leftIsGreen) openLeft = true;
+            if (rightIsGreen) openRight = true;
+        }
+
+        // Update which kicker arms should activate
+        kickLeft = openLeft;
+        kickRight = openRight;
+
+        if (openLeft && openRight) {
+            leftTrapdoor.setPosition(0.0);
+            rightTrapdoor.setPosition(0.2);
+        } else if (openLeft) {
+            leftTrapdoor.setPosition(0.0);
+            rightTrapdoor.setPosition(0.0);
+        } else if (openRight) {
+            rightTrapdoor.setPosition(0.2);
+            leftTrapdoor.setPosition(0.2);
+        } else {
+            leftTrapdoor.setPosition(0.2);
+            rightTrapdoor.setPosition(0.0);
+        }
+
+        // Reset transfer positions
+        leftTransfer.setPosition(0.0);
+        rightTransfer.setPosition(0.5);
+
+        // Reset kicker arms
+        leftKickerArm.setPosition(0.0);
+        rightKickerArm.setPosition(0.5);
     }
 }
 
