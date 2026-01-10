@@ -307,9 +307,6 @@ public class Tele extends OpMode {
         if (gamepad2.left_bumper && !lastGamepad2LeftBumperState) {
             colorPurpleSelected = true;
             colorGreenSelected = false;
-            if (!shootSequenceActive) {
-                startShootSequence();
-            }
         }
         lastGamepad2LeftBumperState = gamepad2.left_bumper;
 
@@ -317,9 +314,6 @@ public class Tele extends OpMode {
         if (gamepad2.right_bumper && !lastGamepad2RightBumperState) {
             colorGreenSelected = true;
             colorPurpleSelected = false;
-            if (!shootSequenceActive) {
-                startShootSequence();
-            }
         }
         lastGamepad2RightBumperState = gamepad2.right_bumper;
 
@@ -333,7 +327,7 @@ public class Tele extends OpMode {
 
         // Set shooter power based on toggle
         if (shooterSpeedOn) {
-            shooter.setPower(0.5);
+            shooter.setPower(0.25);
         } else {
             shooter.setPower(0.0);
         }
@@ -345,7 +339,7 @@ public class Tele extends OpMode {
             if (shootSequenceActive) {
                 stopShootSequence();
             } else {
-                startBackupShootSequence();
+                startShootSequence();
             }
         }
         lastGamepad2RightTriggerState = rightTriggerPressed;
@@ -457,39 +451,6 @@ public class Tele extends OpMode {
                 leftTrapdoor.setPosition(0.2);
                 rightTrapdoor.setPosition(0.0);
             }
-        }
-
-        // Immediate servo actions
-        leftTransfer.setPosition(0.0);
-        rightTransfer.setPosition(0.5);
-    }
-
-    private void startBackupShootSequence() {
-        // Backup shoot sequence: always use left trapdoor and left kicker arm
-        // Independent of color detection
-        shootSequenceActive = true;
-        shootSequenceTimer.reset();
-        distanceCheckPassed = false;
-
-        // Check proximity sensors to determine if single ball mode
-        double leftProximity = ((DistanceSensor) colorSensorLeft).getDistance(DistanceUnit.CM);
-        double rightProximity = ((DistanceSensor) colorSensorRight).getDistance(DistanceUnit.CM);
-        singleBallMode = (leftProximity > 6.5 || rightProximity > 6.5);
-        trapdoorsOpenedForSingleBall = false;
-
-        // Always use left side
-        kickLeft = true;
-        kickRight = false;
-
-        if (singleBallMode) {
-            // Single ball mode: stop intake, open both trapdoors
-            intake.setPower(0.0);
-            leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.2);
-        } else {
-            // Always open left trapdoor (matches X button logic)
-            leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.0);
         }
 
         // Immediate servo actions
