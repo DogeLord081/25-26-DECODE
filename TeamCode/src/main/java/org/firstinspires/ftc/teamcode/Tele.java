@@ -581,48 +581,28 @@ public class Tele extends OpMode {
         shootSequenceTimer.reset();
         distanceCheckPassed = false;
 
-        // Re-run startShootSequence logic for color detection and trapdoors
-        float[] leftHSV = new float[3];
-        float[] rightHSV = new float[3];
-        Color.RGBToHSV(colorSensorLeft.red(), colorSensorLeft.green(), colorSensorLeft.blue(), leftHSV);
-        Color.RGBToHSV(colorSensorRight.red(), colorSensorRight.green(), colorSensorRight.blue(), rightHSV);
+        // Do NOT re-read color sensors - keep using the same kickLeft/kickRight values
+        // that were originally determined until the ball passes the distance sensor check
 
-        boolean leftIsPurple = leftHSV[0] > 175;
-        boolean leftIsGreen = !leftIsPurple;
-        boolean rightIsPurple = rightHSV[0] > 175;
-        boolean rightIsGreen = !rightIsPurple;
-
-        boolean openLeft = false;
-        boolean openRight = false;
-
-        if (colorPurpleSelected) {
-            if (leftIsPurple) openLeft = true;
-            if (rightIsPurple) openRight = true;
-        } else if (colorGreenSelected) {
-            if (leftIsGreen) openLeft = true;
-            if (rightIsGreen) openRight = true;
-        }
-
-        // Update which kicker arms should activate (prioritize left if both same color)
-        if (openLeft && openRight) {
-            kickLeft = true;
-            kickRight = false;
-        } else {
-            kickLeft = openLeft;
-            kickRight = openRight;
-        }
-
-        if (openLeft && openRight) {
+        if (singleBallMode) {
+            // Single ball mode: open both trapdoors again
             leftTrapdoor.setPosition(0.0);
             rightTrapdoor.setPosition(0.2);
-        } else if (openLeft) {
+        } else if (kickLeft && kickRight) {
+            // Both sides (shouldn't happen since we prioritize left, but handle it)
+            leftTrapdoor.setPosition(0.0);
+            rightTrapdoor.setPosition(0.2);
+        } else if (kickLeft) {
+            // Left side
             leftTrapdoor.setPosition(0.0);
             rightTrapdoor.setPosition(0.0);
-        } else if (openRight) {
+        } else if (kickRight) {
+            // Right side
             rightTrapdoor.setPosition(0.2);
             leftTrapdoor.setPosition(0.2);
         } else {
-            leftTrapdoor.setPosition(0.2);
+            // No match (backup - use left side)
+            leftTrapdoor.setPosition(0.0);
             rightTrapdoor.setPosition(0.0);
         }
 
