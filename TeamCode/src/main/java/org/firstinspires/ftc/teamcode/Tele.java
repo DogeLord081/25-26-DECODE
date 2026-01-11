@@ -165,20 +165,24 @@ public class Tele extends OpMode {
         // Get the robot's heading from the IMU
         double botHeading = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
 
-        // Get joystick inputs - Left Stick: Robot Movement (Strafe/Drive)
+        // Get joystick inputs
         double y = -gamepad1.left_stick_y;  // Forward/backward (pushing stick forward gives negative value)
         double x = gamepad1.left_stick_x;   // Left/right strafe
-        // Right Stick: Robot Rotation
         double yaw = gamepad1.right_stick_x; // Rotation (stays robot-centric)
 
-        // Rotate the joystick inputs by the negative of the robot's heading
-        // This makes forward on joystick always move the robot away from driver
+        // Rotate the joystick inputs by the robot's heading
+        // This makes forward on joystick always move the robot away from driver (field-centric)
+        // rotY = new forward/backward, rotX = new strafe
         double rotX = x * Math.cos(-botHeading) - y * Math.sin(-botHeading);
         double rotY = x * Math.sin(-botHeading) + y * Math.cos(-botHeading);
 
         // Use rotated values for axial and lateral movement
-        float axial = (float) rotY;
+        // rotY is the new forward/backward, rotX is the new strafe
         float lateral = (float) rotX;
+        float axial = (float) rotY;
+
+        // Apply a strafe correction factor (strafing is typically less efficient)
+        lateral = lateral * 1.1f;
 
         // Combine the joystick requests for each axis-motion to determine each wheel's power.
         float leftFrontPower = axial + lateral + (float) yaw;
@@ -186,11 +190,17 @@ public class Tele extends OpMode {
         float leftBackPower = axial - lateral + (float) yaw;
         float rightBackPower = axial + lateral - (float) yaw;
 
-        // clip the right/left values so that the values never exceed +/- 0.8
+        // clip the right/left values so that the values never exceed +/- 1
         rightFrontPower = (float) Range.clip(rightFrontPower, -0.8, 0.8);
         leftFrontPower = (float) Range.clip(leftFrontPower, -0.8, 0.8);
         leftBackPower = (float) Range.clip(leftBackPower, -0.8, 0.8);
         rightBackPower = (float) Range.clip(rightBackPower, -0.8, 0.8);
+
+        // write the values to the motors
+        rightFront.setPower(rightFrontPower);
+        leftFront.setPower(leftFrontPower);
+        leftBack.setPower(leftBackPower);
+        rightBack.setPower(rightBackPower);
 
         // Right Trigger (Toggle): Auto-Aim / Position - TODO: Implement AprilTag centering
         if (gamepad1.right_trigger > 0.5 && !lastGamepad1RightTriggerState) {
