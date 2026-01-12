@@ -13,6 +13,7 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 
 public class Constants {
     public static MecanumConstants driveConstants = new MecanumConstants()
+            .yVelocity(34.0)
             .xVelocity(60.0)
             .maxPower(1)
             .rightFrontMotorName("rightFront")
