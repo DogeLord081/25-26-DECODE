@@ -40,6 +40,14 @@ public class Tele extends OpMode {
     protected IMU imu;
     protected DistanceSensor distanceSensor;
 
+    // Motor correction multipliers (to make robot drive straight)
+    // Original values: LF=0.3525, RF=0.35, LB=0.41, RB=0.3425
+    // Scaled so max (0.41) = 1.0, preserving ratios
+    private static final double LF_MULTIPLIER = 0.3525 / 0.41;  // ≈ 0.8598
+    private static final double RF_MULTIPLIER = 0.35 / 0.41;    // ≈ 0.8537
+    private static final double LB_MULTIPLIER = 1.0;            // = 1.0
+    private static final double RB_MULTIPLIER = 0.3425 / 0.41;  // ≈ 0.8354
+
     // ========== CONTROLLER 1 (DRIVER) STATE ==========
     // Intake toggle state (Right Bumper)
     private boolean intakeToggleOn = false;
@@ -191,10 +199,16 @@ public class Tele extends OpMode {
         float rightBackPower = axial + lateral - (float) yaw;
 
         // clip the right/left values so that the values never exceed +/- 1
-        rightFrontPower = (float) Range.clip(rightFrontPower, -0.8, 0.8);
-        leftFrontPower = (float) Range.clip(leftFrontPower, -0.8, 0.8);
-        leftBackPower = (float) Range.clip(leftBackPower, -0.8, 0.8);
-        rightBackPower = (float) Range.clip(rightBackPower, -0.8, 0.8);
+        rightFrontPower = (float) Range.clip(rightFrontPower, -1.0, 1.0);
+        leftFrontPower = (float) Range.clip(leftFrontPower, -1.0, 1.0);
+        leftBackPower = (float) Range.clip(leftBackPower, -1.0, 1.0);
+        rightBackPower = (float) Range.clip(rightBackPower, -1.0, 1.0);
+
+        // Apply motor correction multipliers to compensate for motor imbalances
+        rightFrontPower *= RF_MULTIPLIER;
+        leftFrontPower *= LF_MULTIPLIER;
+        leftBackPower *= LB_MULTIPLIER;
+        rightBackPower *= RB_MULTIPLIER;
 
         // write the values to the motors
         rightFront.setPower(rightFrontPower);

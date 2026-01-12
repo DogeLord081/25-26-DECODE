@@ -440,11 +440,31 @@ class LateralVelocityTuner extends OpMode {
     public static double DISTANCE = 48;
     public static double RECORD_NUMBER = 10;
 
+    // Motor correction multipliers (to make robot strafe straight)
+    // Original values: LF=0.3525, RF=0.35, LB=0.41, RB=0.3425
+    // Scaled so max (0.41) = 1.0, preserving ratios
+    private static final double LF_MULT = 0.3525 / 0.41;  // ≈ 0.8598
+    private static final double RF_MULT = 0.35 / 0.41;    // ≈ 0.8537
+    private static final double LB_MULT = 1.0;            // = 1.0
+    private static final double RB_MULT = 0.3425 / 0.41;  // ≈ 0.8354
+
+    // Direct motor references for applying correction
+    private com.qualcomm.robotcore.hardware.DcMotor leftFront;
+    private com.qualcomm.robotcore.hardware.DcMotor rightFront;
+    private com.qualcomm.robotcore.hardware.DcMotor leftBack;
+    private com.qualcomm.robotcore.hardware.DcMotor rightBack;
+
     private boolean end;
 
     @Override
     public void init() {
         follower.setStartingPose(new Pose(72, 72));
+
+        // Get motor references for direct control with correction
+        leftFront = hardwareMap.get(com.qualcomm.robotcore.hardware.DcMotor.class, "leftFront");
+        rightFront = hardwareMap.get(com.qualcomm.robotcore.hardware.DcMotor.class, "rightFront");
+        leftBack = hardwareMap.get(com.qualcomm.robotcore.hardware.DcMotor.class, "leftBack");
+        rightBack = hardwareMap.get(com.qualcomm.robotcore.hardware.DcMotor.class, "rightBack");
     }
 
     /**
@@ -493,7 +513,13 @@ class LateralVelocityTuner extends OpMode {
                 end = true;
                 stopRobot();
             } else {
-                follower.setTeleOpDrive(0,1,0,true);
+                // Strafe left with motor correction multipliers applied
+                // For strafing left: LF+, RF-, LB-, RB+
+                leftFront.setPower(LF_MULT);
+                rightFront.setPower(-RF_MULT);
+                leftBack.setPower(-LB_MULT);
+                rightBack.setPower(RB_MULT);
+
                 double currentVelocity = Math.abs(follower.getVelocity().dot(new Vector(1, Math.PI / 2)));
                 velocities.add(currentVelocity);
                 velocities.remove(0);
