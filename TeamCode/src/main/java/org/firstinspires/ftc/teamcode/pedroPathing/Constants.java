@@ -39,7 +39,7 @@ public class Constants {
             .IMU_HardwareMapName("imu")
             .IMU_Orientation(new RevHubOrientationOnRobot(RevHubOrientationOnRobot.LogoFacingDirection.BACKWARD, RevHubOrientationOnRobot.UsbFacingDirection.UP));
     public static FollowerConstants followerConstants = new FollowerConstants()
-        .mass(20.4117);
+        .mass(15.8757);
 
     public static PathConstraints pathConstraints = new PathConstraints(0.99, 100, 1, 1);
 
