@@ -1,5 +1,6 @@
 package org.firstinspires.ftc.teamcode.pedroPathing;
 
+import com.pedropathing.control.PIDFCoefficients;
 import com.pedropathing.follower.Follower;
 import com.pedropathing.follower.FollowerConstants;
 import com.pedropathing.ftc.FollowerBuilder;
@@ -40,9 +41,15 @@ public class Constants {
             .IMU_HardwareMapName("imu")
             .IMU_Orientation(new RevHubOrientationOnRobot(RevHubOrientationOnRobot.LogoFacingDirection.BACKWARD, RevHubOrientationOnRobot.UsbFacingDirection.UP));
     public static FollowerConstants followerConstants = new FollowerConstants()
+        .drivePIDFSwitch(3)
+        .secondaryTranslationalPIDFCoefficients(new PIDFCoefficients(0.377,0,0.0481,0.066))
+        .translationalPIDFCoefficients(new PIDFCoefficients(0.29, 0, 0.037, 0.066))
         .lateralZeroPowerAcceleration(-62.7312857143)
         .forwardZeroPowerAcceleration(-29.17948)
-        .mass(15.8757);
+        .mass(15.8757)
+        .useSecondaryTranslationalPIDF(true)
+        .useSecondaryHeadingPIDF(true)
+        .useSecondaryDrivePIDF(true);
 
     public static PathConstraints pathConstraints = new PathConstraints(0.99, 100, 1, 1);
 

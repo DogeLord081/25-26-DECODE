@@ -1,11 +1,9 @@
 package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
-//import com.qualcomm.robotcore.hardware.CRServo;
 import android.graphics.Color;
 import com.qualcomm.robotcore.hardware.ColorSensor;
 import com.qualcomm.robotcore.hardware.DcMotor;
-//import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.DistanceSensor;
 import com.qualcomm.robotcore.util.Range;
 import com.qualcomm.robotcore.util.ElapsedTime;
@@ -15,6 +13,7 @@ import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import com.qualcomm.robotcore.hardware.DistanceSensor;
+import com.qualcomm.hardware.dfrobot.HuskyLens;
 
 
 @com.qualcomm.robotcore.eventloop.opmode.TeleOp (name = "Tele")
@@ -39,6 +38,7 @@ public class Tele extends OpMode {
     protected ColorSensor colorSensorLeft;
     protected IMU imu;
     protected DistanceSensor distanceSensor;
+    protected HuskyLens huskyLens;
 
     // Motor correction multipliers (to make robot drive straight)
     // Original values: LF=0.3525, RF=0.35, LB=0.41, RB=0.3425
@@ -133,6 +133,9 @@ public class Tele extends OpMode {
 
         // Get the distance sensor and motor from hardwareMap
         distanceSensor = hardwareMap.get(DistanceSensor.class, "distanceSensor");
+
+        // Initialize HuskyLens
+        huskyLens = hardwareMap.get(HuskyLens.class, "huskyLens");
 
         // Initialize IMU for field-centric driving
         imu = hardwareMap.get(IMU.class, "imu");
