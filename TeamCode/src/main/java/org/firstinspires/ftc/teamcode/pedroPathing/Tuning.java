@@ -691,7 +691,7 @@ class LateralZeroPowerAccelerationTuner extends OpMode {
         follower.update();
         draw();
 
-        Vector heading = new Vector(1.0, follower.getPose().getHeading() - Math.PI / 2);
+        Vector heading = new Vector(1.0, follower.getPose().getHeading() + Math.PI / 2);
         if (!end) {
             if (!stopping) {
                 if (Math.abs(follower.getVelocity().dot(heading)) > VELOCITY) {

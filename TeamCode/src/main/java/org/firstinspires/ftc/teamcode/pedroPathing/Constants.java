@@ -13,8 +13,8 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 
 public class Constants {
     public static MecanumConstants driveConstants = new MecanumConstants()
-            .yVelocity(34.0)
-            .xVelocity(60.0)
+            .yVelocity(36.1123)
+            .xVelocity(61.0)
             .maxPower(1)
             .rightFrontMotorName("rightFront")
             .rightRearMotorName("rightBack")
@@ -40,6 +40,8 @@ public class Constants {
             .IMU_HardwareMapName("imu")
             .IMU_Orientation(new RevHubOrientationOnRobot(RevHubOrientationOnRobot.LogoFacingDirection.BACKWARD, RevHubOrientationOnRobot.UsbFacingDirection.UP));
     public static FollowerConstants followerConstants = new FollowerConstants()
+        .lateralZeroPowerAcceleration(-62.7312857143)
+        .forwardZeroPowerAcceleration(-29.17948)
         .mass(15.8757);
 
     public static PathConstraints pathConstraints = new PathConstraints(0.99, 100, 1, 1);
