@@ -137,6 +137,14 @@ public class Tele extends OpMode {
         // Initialize HuskyLens
         huskyLens = hardwareMap.get(HuskyLens.class, "huskyLens");
 
+        // Configure HuskyLens for AprilTag recognition
+        if (!huskyLens.knock()) {
+            telemetry.addData("HuskyLens", "Problem communicating with HuskyLens");
+        } else {
+            telemetry.addData("HuskyLens", "Connected");
+        }
+        huskyLens.selectAlgorithm(HuskyLens.Algorithm.TAG_RECOGNITION);
+
         // Initialize IMU for field-centric driving
         imu = hardwareMap.get(IMU.class, "imu");
         IMU.Parameters parameters = new IMU.Parameters(new RevHubOrientationOnRobot(
@@ -401,6 +409,53 @@ public class Tele extends OpMode {
                 leftHSV[0], leftHSV[1], leftHSV[2], ((DistanceSensor) colorSensorLeft).getDistance(DistanceUnit.CM));
         telemetry.addData("Right Color Sensor (H,S,V,D)", "(%.1f, %.2f, %.2f, %.3f)",
                 rightHSV[0], rightHSV[1], rightHSV[2], ((DistanceSensor) colorSensorRight).getDistance(DistanceUnit.CM));
+
+        // HuskyLens AprilTag Detection and Pose Estimation
+        telemetry.addData("--- HUSKYLENS APRILTAGS ---", "");
+        HuskyLens.Block[] blocks = huskyLens.blocks();
+        telemetry.addData("AprilTags Detected", blocks.length);
+        telemetry.addData("Note", "ID=0 means unlearned. Learn tags via HuskyLens button.");
+
+        // HuskyLens camera parameters (approximate for pose estimation)
+        // HuskyLens has 320x240 resolution with ~60 degree horizontal FOV
+        final double HUSKYLENS_IMAGE_WIDTH = 320.0;
+        final double HUSKYLENS_IMAGE_HEIGHT = 240.0;
+        final double HUSKYLENS_HORIZONTAL_FOV_DEG = 60.0; // Approximate horizontal field of view
+        final double APRILTAG_REAL_SIZE_CM = 6.35; // Standard FTC AprilTag is 6.35 cm (2.5 inches)
+
+        for (int i = 0; i < blocks.length; i++) {
+            HuskyLens.Block block = blocks[i];
+
+            // Block contains: id, x (center), y (center), width, height
+            int tagId = block.id;
+            int centerX = block.x;
+            int centerY = block.y;
+            int tagWidth = block.width;
+            int tagHeight = block.height;
+
+            // Estimate distance based on apparent size (using width as reference)
+            // distance = (realSize * focalLength) / apparentSize
+            // focalLength (in pixels) ≈ (imageWidth / 2) / tan(FOV/2)
+            double focalLengthPixels = (HUSKYLENS_IMAGE_WIDTH / 2.0) / Math.tan(Math.toRadians(HUSKYLENS_HORIZONTAL_FOV_DEG / 2.0));
+            double estimatedDistanceCm = (APRILTAG_REAL_SIZE_CM * focalLengthPixels) / tagWidth;
+
+            // Estimate horizontal angle/rotation (yaw) based on X position
+            // Center of image = 0 degrees, left = negative, right = positive
+            double offsetFromCenterPixels = centerX - (HUSKYLENS_IMAGE_WIDTH / 2.0);
+            double estimatedYawDeg = Math.toDegrees(Math.atan(offsetFromCenterPixels / focalLengthPixels));
+
+            // Estimate vertical angle (pitch) based on Y position
+            double verticalOffsetPixels = centerY - (HUSKYLENS_IMAGE_HEIGHT / 2.0);
+            double focalLengthVertical = (HUSKYLENS_IMAGE_HEIGHT / 2.0) / Math.tan(Math.toRadians(HUSKYLENS_HORIZONTAL_FOV_DEG * (HUSKYLENS_IMAGE_HEIGHT / HUSKYLENS_IMAGE_WIDTH) / 2.0));
+            double estimatedPitchDeg = Math.toDegrees(Math.atan(verticalOffsetPixels / focalLengthVertical));
+
+            telemetry.addData("Tag " + i + " Info", block.toString());
+            telemetry.addData("  Learned ID", tagId);
+            telemetry.addData("  Center", "(%d, %d), Size: %dx%d", centerX, centerY, tagWidth, tagHeight);
+            telemetry.addData("  Pose Est", "Dist: %.1f cm, Yaw: %.1f°, Pitch: %.1f°",
+                    estimatedDistanceCm, estimatedYawDeg, estimatedPitchDeg);
+        }
+
         telemetry.update();
     }
 

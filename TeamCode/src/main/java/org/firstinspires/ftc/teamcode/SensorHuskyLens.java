@@ -30,7 +30,7 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR
 TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-package org.firstinspires.ftc.robotcontroller.external.samples;
+package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.hardware.dfrobot.HuskyLens;
 import com.qualcomm.robotcore.eventloop.opmode.Disabled;
@@ -50,17 +50,16 @@ import java.util.concurrent.TimeUnit;
  * documentation: https://wiki.dfrobot.com/HUSKYLENS_V1.0_SKU_SEN0305_SEN0336
  *
  * For detailed instructions on how a HuskyLens is used in FTC, please see this tutorial:
- * https://ftc-docs.firstinspires.org/en/latest/devices/huskylens/huskylens.html
+ * https://ftc-docs.firstinspires.org/en/latest/devices/huskyLens/huskyLens.html
  * 
  * This sample illustrates how to detect AprilTags, but can be used to detect other types
  * of objects by changing the algorithm. It assumes that the HuskyLens is configured with
- * a name of "huskylens".
+ * a name of "huskyLens".
  *
  * Use Android Studio to Copy this Class, and Paste it into your team's code folder with a new name.
  * Remove or comment out the @Disabled line to add this OpMode to the Driver Station OpMode list
  */
 @TeleOp(name = "Sensor: HuskyLens", group = "Sensor")
-@Disabled
 public class SensorHuskyLens extends LinearOpMode {
 
     private final int READ_PERIOD = 1;
@@ -70,7 +69,7 @@ public class SensorHuskyLens extends LinearOpMode {
     @Override
     public void runOpMode()
     {
-        huskyLens = hardwareMap.get(HuskyLens.class, "huskylens");
+        huskyLens = hardwareMap.get(HuskyLens.class, "huskyLens");
 
         /*
          * This sample rate limits the reads solely to allow a user time to observe
@@ -141,8 +140,13 @@ public class SensorHuskyLens extends LinearOpMode {
              */
             HuskyLens.Block[] blocks = huskyLens.blocks();
             telemetry.addData("Block count", blocks.length);
+            telemetry.addData("Note", "ID=0 means tag not learned. Use HuskyLens button to learn tags.");
             for (int i = 0; i < blocks.length; i++) {
-                telemetry.addData("Block, ID", blocks[i].toString(), blocks[i].id);
+                // Display full block info - toString() contains all details
+                telemetry.addData("Block " + i, blocks[i].toString());
+                telemetry.addData("  Learned ID", blocks[i].id);
+                telemetry.addData("  Position", "x=%d, y=%d", blocks[i].x, blocks[i].y);
+                telemetry.addData("  Size", "w=%d, h=%d", blocks[i].width, blocks[i].height);
                 /*
                  * Here inside the FOR loop, you could save or evaluate specific info for the currently recognized Bounding Box:
                  * - blocks[i].width and blocks[i].height   (size of box, in pixels)
