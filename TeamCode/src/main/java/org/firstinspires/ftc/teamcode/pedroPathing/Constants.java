@@ -42,7 +42,7 @@ public class Constants {
             .IMU_HardwareMapName("imu")
             .IMU_Orientation(new RevHubOrientationOnRobot(RevHubOrientationOnRobot.LogoFacingDirection.BACKWARD, RevHubOrientationOnRobot.UsbFacingDirection.UP));
     public static FollowerConstants followerConstants = new FollowerConstants()
-        .drivePIDFCoefficients(new FilteredPIDFCoefficients(8,0,0,0, 0))
+        .drivePIDFCoefficients(new FilteredPIDFCoefficients(0.02,0,0.003,0.6, 0.01))
         .headingPIDFSwitch(3)
         .secondaryHeadingPIDFCoefficients(new PIDFCoefficients(1.118,0,0.169884,0.07))
         .headingPIDFCoefficients(new PIDFCoefficients(0.86,0,0.13068,0.07))
