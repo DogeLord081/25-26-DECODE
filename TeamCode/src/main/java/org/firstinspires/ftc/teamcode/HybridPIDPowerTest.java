@@ -37,20 +37,29 @@ public class HybridPIDPowerTest extends OpMode {
     private static final double AIM_TOLERANCE_PIXELS = 15.0;  // Tolerance for "centered"
     private static final double AIM_KP = 0.003;  // Proportional gain for auto-aim
 
-    // Lookup table: {distance (inches), leftHood position, power (0.0-1.0)}
+    // Lookup table: {distance (inches), leftHood position, target RPM}
+    // RPM values calculated from power percentages assuming max RPM at full power
+    // Adjust MAX_SHOOTER_RPM based on your motor specs (e.g., 6000 RPM for a typical shooter motor)
+    private static final double MAX_SHOOTER_RPM = 4900.0;
     private static final double[][] SHOOTER_LOOKUP_TABLE = {
-        {18, 0.05, 0.40},
-        {24, 0.05, 0.40},
-        {30, 0.05, 0.40},
-        {36, 0.30, 0.425},
-        {42, 0.30, 0.425},
-        {48, 0.20, 0.45},
-        {54, 0.30, 0.45},
-        {60, 0.30, 0.45},
-        {66, 0.30, 0.47},
-        {72, 0.30, 0.49},
-        {118, 0.30, 0.55}
+        {18, 0.05, 2400},   // 40% -> 2400 RPM
+        {24, 0.05, 2400},   // 40% -> 2400 RPM
+        {30, 0.05, 2400},   // 40% -> 2400 RPM
+        {36, 0.30, 2550},   // 42.5% -> 2550 RPM
+        {42, 0.30, 2550},   // 42.5% -> 2550 RPM
+        {48, 0.20, 2700},   // 45% -> 2700 RPM
+        {54, 0.30, 2700},   // 45% -> 2700 RPM
+        {60, 0.30, 2700},   // 45% -> 2700 RPM
+        {66, 0.30, 2820},   // 47% -> 2820 RPM
+        {72, 0.30, 2940},   // 49% -> 2940 RPM
+        {118, 0.30, 3300}   // 55% -> 3300 RPM
     };
+
+    // Shooter PID constants for RPM control
+    private static final double SHOOTER_KP = 0.0002;   // Proportional gain
+    private static final double SHOOTER_KI = 0.00001;  // Integral gain
+    private static final double SHOOTER_KD = 0.00001;  // Derivative gain
+    private static final double SHOOTER_KF = 1.0 / MAX_SHOOTER_RPM;  // Feedforward gain (1/maxRPM gives base power)
 
     // Motor correction multipliers (to make robot drive straight)
     private static final double LF_MULTIPLIER = 0.3525 / 0.41;  // ≈ 0.8598
@@ -59,7 +68,8 @@ public class HybridPIDPowerTest extends OpMode {
     private static final double RB_MULTIPLIER = 0.3425 / 0.41;  // ≈ 0.8354
 
     // Shooter speed
-    private double shooterSpeed = 0.0;
+    private double targetShooterRPM = 0.0;  // Target RPM from lookup table
+    private double shooterPower = 0.0;      // Actual power sent to motor (controlled by PID)
 
     // Hood adjustment positions
     private double leftHoodPosition = 0.15;
@@ -71,13 +81,18 @@ public class HybridPIDPowerTest extends OpMode {
 
     // Shooter encoder tracking for automatic transfer
     private int lastShooterEncoderPosition = 0;
-    private double shooterVelocity = 0.0;  // Ticks per second
+    private double shooterRPM = 0.0;  // Actual measured RPM
     private ElapsedTime velocityTimer = new ElapsedTime();
     private ElapsedTime transferTimer = new ElapsedTime();
     private boolean autoTransferTriggered = false;
 
-    // Target shooter velocity threshold (as a percentage of current speed, 0.0-1.0)
-    private double targetShooterSpeedThreshold = 0.95;  // 95% of current speed reached
+    // Shooter PID state variables
+    private double shooterIntegral = 0.0;
+    private double shooterLastError = 0.0;
+
+    // Encoder ticks per revolution - adjust based on your motor
+    // Common values: 28 (bare motor), 288 (20:1 gearbox), 537.7 (19.2:1 gearbox)
+    private static final double SHOOTER_TICKS_PER_REV = 28.0;
 
     // AprilTag tracking variables
     private double detectedDistance = 0.0;
@@ -88,9 +103,8 @@ public class HybridPIDPowerTest extends OpMode {
     private double autoAimRotation = 0.0;
     private boolean isAimed = false;
 
-    // Shooter constants - adjust these based on your motor
-    // This maps power to expected velocity: at power X, expect X * this value in ticks/sec
-    private static final double SHOOTER_TICKS_PER_SECOND_AT_FULL_POWER = 2000.0;  // Ticks per second at power = 1.0
+    // Shooter constants - RPM tolerance for auto transfer
+    private static final double RPM_TOLERANCE_PERCENT = 0.05;  // 5% tolerance
 
 
     @Override
@@ -241,7 +255,7 @@ public class HybridPIDPowerTest extends OpMode {
             // Apply lookup table values based on distance
             double[] lookupValues = interpolateLookupTable(detectedDistance);
             leftHoodPosition = lookupValues[0];
-            shooterSpeed = lookupValues[1];
+            targetShooterRPM = lookupValues[1];  // Now in RPM instead of power percentage
 
             // Apply hood positions
             leftHoodAdjustment.setPosition(leftHoodPosition);
@@ -292,39 +306,62 @@ public class HybridPIDPowerTest extends OpMode {
 
         // ========== SHOOTER SPEED CONTROL ==========
         // Shooter speed is automatically set from lookup table based on AprilTag distance
-        // Manual bumper control removed - speed is now automatic
+        // Uses PID control to maintain target RPM
 
-        // Set shooter power
-        shooter.setPower(shooterSpeed);
+        // ========== SHOOTER RPM TRACKING AND PID CONTROL ==========
 
-        // ========== SHOOTER VELOCITY TRACKING AND AUTO TRANSFER ==========
-
-        // Calculate shooter velocity from encoder
+        // Calculate shooter RPM from encoder
         int currentShooterPosition = shooter.getCurrentPosition();
         double deltaTime = velocityTimer.seconds();
 
         if (deltaTime > 0.02) {  // Update velocity every 20ms
             int deltaTicks = currentShooterPosition - lastShooterEncoderPosition;
-            shooterVelocity = Math.abs(deltaTicks / deltaTime);  // Ticks per second
+            double ticksPerSecond = Math.abs(deltaTicks / deltaTime);
+            // Convert ticks/second to RPM: (ticks/sec) / (ticks/rev) * 60 = RPM
+            shooterRPM = (ticksPerSecond / SHOOTER_TICKS_PER_REV) * 60.0;
             lastShooterEncoderPosition = currentShooterPosition;
             velocityTimer.reset();
         }
 
-        // Calculate current speed as percentage of motor's max capacity (0.0 to 1.0)
-        // This is directly comparable to setPower values
-        double currentSpeedPercent = shooterVelocity / SHOOTER_TICKS_PER_SECOND_AT_FULL_POWER;
+        // PID control for shooter RPM
+        if (targetShooterRPM > 0) {
+            double error = targetShooterRPM - shooterRPM;
 
-        // Target range: 95% to 105% of shooter power setting
-        // e.g., for 0.4 power: lower = 0.38, upper = 0.42
-        double targetLowerBound = shooterSpeed * targetShooterSpeedThreshold;  // 95% of target
-        double targetUpperBound = shooterSpeed * 1.05;  // 105% of target
+            // Integrate error (with anti-windup)
+            shooterIntegral += error * deltaTime;
+            shooterIntegral = Range.clip(shooterIntegral, -5000, 5000);  // Limit integral accumulation
 
-        // Check if speed is in the valid range
-        boolean speedInRange = shooterSpeed > 0 && currentSpeedPercent >= targetLowerBound && currentSpeedPercent <= targetUpperBound;
+            // Calculate derivative
+            double derivative = (error - shooterLastError) / deltaTime;
+            shooterLastError = error;
 
-        // Auto transfer logic: open when B is pressed AND speed is within target range, close after 2.5 seconds
-        if (gamepad1.b && speedInRange && !autoTransferTriggered) {
-            // Shooter has reached target speed - open transfer
+            // Calculate feedforward (base power to reach target RPM)
+            double feedforward = targetShooterRPM * SHOOTER_KF;
+
+            // Calculate PID output
+            double pidOutput = (SHOOTER_KP * error) + (SHOOTER_KI * shooterIntegral) + (SHOOTER_KD * derivative);
+
+            // Combine feedforward and PID
+            shooterPower = feedforward + pidOutput;
+            shooterPower = Range.clip(shooterPower, 0.0, 1.0);
+        } else {
+            // Reset PID state when shooter is off
+            shooterPower = 0.0;
+            shooterIntegral = 0.0;
+            shooterLastError = 0.0;
+        }
+
+        // Set shooter power
+        shooter.setPower(shooterPower);
+
+        // Check if RPM is within tolerance for auto transfer
+        double rpmLowerBound = targetShooterRPM * (1.0 - RPM_TOLERANCE_PERCENT);
+        double rpmUpperBound = targetShooterRPM * (1.0 + RPM_TOLERANCE_PERCENT);
+        boolean rpmInRange = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
+
+        // Auto transfer logic: open when B is pressed AND RPM is within target range, close after 2.5 seconds
+        if (gamepad1.b && rpmInRange && !autoTransferTriggered) {
+            // Shooter has reached target RPM - open transfer
             autoTransferTriggered = true;
             transfersOpen = true;
             leftTransfer.setPosition(0.5);
@@ -341,7 +378,7 @@ public class HybridPIDPowerTest extends OpMode {
         }
 
         // Reset auto transfer trigger when shooter is turned off
-        if (shooterSpeed == 0) {
+        if (targetShooterRPM == 0) {
             autoTransferTriggered = false;
         }
 
@@ -380,11 +417,11 @@ public class HybridPIDPowerTest extends OpMode {
         telemetry.addData("Auto-Aim", autoAimEnabled ? "ENABLED (Y to toggle)" : "DISABLED (Y to toggle)");
 
         telemetry.addData("--- Shooter ---", "");
-        telemetry.addData("Shooter Power Set", "%.0f%%", shooterSpeed * 100);
-        telemetry.addData("Shooter Velocity (ticks/s)", "%.0f", shooterVelocity);
-        telemetry.addData("Actual Speed %", "%.1f%%", currentSpeedPercent * 100);
-        telemetry.addData("Target Range", "%.1f%% - %.1f%%", targetLowerBound * 100, targetUpperBound * 100);
-        telemetry.addData("Speed In Range", speedInRange ? "YES - Press B to shoot!" : "NO");
+        telemetry.addData("Target RPM", "%.0f", targetShooterRPM);
+        telemetry.addData("Actual RPM", "%.0f", shooterRPM);
+        telemetry.addData("Shooter Power", "%.1f%%", shooterPower * 100);
+        telemetry.addData("RPM Range", "%.0f - %.0f", rpmLowerBound, rpmUpperBound);
+        telemetry.addData("RPM In Range", rpmInRange ? "YES - Press B to shoot!" : "NO");
         telemetry.addData("Auto Transfer", autoTransferTriggered ? "ACTIVE" : "Ready");
 
         telemetry.addData("--- Hood ---", "");
