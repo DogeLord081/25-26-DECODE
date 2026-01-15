@@ -32,7 +32,7 @@ public class HybridPIDPowerTest extends OpMode {
     private static final int HUSKYLENS_WIDTH = 320;  // HuskyLens resolution width
 
     // Auto-aim target position (75% from right = 25% from left = 80 pixels on 320 width screen)
-    private static final double TARGET_X_PERCENT = 0.25;  // 25% from left edge
+    private static final double TARGET_X_PERCENT = 0.75;  // 25% from left edge
     private static final int TARGET_X_PIXELS = (int)(HUSKYLENS_WIDTH * TARGET_X_PERCENT);  // 80 pixels
     private static final double AIM_TOLERANCE_PIXELS = 15.0;  // Tolerance for "centered"
     private static final double AIM_KP = 0.003;  // Proportional gain for auto-aim
@@ -42,17 +42,17 @@ public class HybridPIDPowerTest extends OpMode {
     // Adjust MAX_SHOOTER_RPM based on your motor specs (e.g., 6000 RPM for a typical shooter motor)
     private static final double MAX_SHOOTER_RPM = 4900.0;
     private static final double[][] SHOOTER_LOOKUP_TABLE = {
-        {18, 0.05, 2400},   // 40% -> 2400 RPM
-        {24, 0.05, 2400},   // 40% -> 2400 RPM
-        {30, 0.05, 2400},   // 40% -> 2400 RPM
-        {36, 0.30, 2550},   // 42.5% -> 2550 RPM
-        {42, 0.30, 2550},   // 42.5% -> 2550 RPM
-        {48, 0.20, 2700},   // 45% -> 2700 RPM
-        {54, 0.30, 2700},   // 45% -> 2700 RPM
-        {60, 0.30, 2700},   // 45% -> 2700 RPM
-        {66, 0.30, 2820},   // 47% -> 2820 RPM
-        {72, 0.30, 2940},   // 49% -> 2940 RPM
-        {118, 0.30, 3300}   // 55% -> 3300 RPM
+        {18, 0.05, 1800},   // 40% -> 2400 RPM
+        {24, 0.05, 1800},   // 40% -> 2400 RPM
+        {30, 0.05, 1800},   // 40% -> 2400 RPM
+        {36, 0.30, 1800},   // 42.5% -> 2550 RPM
+        {42, 0.30, 1800},   // 42.5% -> 2550 RPM
+        {48, 0.20, 1850},   // 45% -> 2700 RPM
+        {54, 0.30, 1850},   // 45% -> 2700 RPM
+        {60, 0.30, 1900},   // 45% -> 2700 RPM
+        {66, 0.30, 2000},   // 47% -> 2820 RPM
+        {72, 0.30, 2050},   // 49% -> 2940 RPM
+        {118, 0.30, 2250}   // 55% -> 3300 RPM
     };
 
     // Shooter PID constants for RPM control
