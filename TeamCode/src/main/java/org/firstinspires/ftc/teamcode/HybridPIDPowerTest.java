@@ -31,11 +31,19 @@ public class HybridPIDPowerTest extends OpMode {
     private static final double HEIGHT_DIFF_INCHES = 18.0;
     private static final int HUSKYLENS_WIDTH = 320;  // HuskyLens resolution width
 
-    // Auto-aim target position (75% from right = 25% from left = 80 pixels on 320 width screen)
-    private static final double TARGET_X_PERCENT = 0.75;  // 25% from left edge
-    private static final int TARGET_X_PIXELS = (int)(HUSKYLENS_WIDTH * TARGET_X_PERCENT);  // 80 pixels
+    // Auto-aim target position - dynamically calculated based on approach angle
+    // Angle lookup: {angle (degrees), target X percent from left}
+    // 45 degrees left → 90% from left, 90 degrees (head on) → 75%, 45 degrees right → 60%
+    private static final double[][] ANGLE_TO_TARGET_LOOKUP = {
+        {45, 0.90},   // 45 degrees to the left → tag at 90% from left
+        {90, 0.75},   // Head on (90 degrees) → tag at 75% from left
+        {135, 0.60}   // 45 degrees to the right → tag at 60% from left
+    };
     private static final double AIM_TOLERANCE_PIXELS = 15.0;  // Tolerance for "centered"
     private static final double AIM_KP = 0.003;  // Proportional gain for auto-aim
+
+    // HuskyLens horizontal field of view (degrees) - used to calculate approach angle from tag position
+    private static final double HUSKYLENS_HFOV_DEGREES = 60.0;
 
     // Lookup table: {distance (inches), leftHood position, target RPM}
     // RPM values calculated from power percentages assuming max RPM at full power
@@ -102,6 +110,8 @@ public class HybridPIDPowerTest extends OpMode {
     private boolean lastYButtonState = false;
     private double autoAimRotation = 0.0;
     private boolean isAimed = false;
+    private double approachAngle = 90.0;  // Approach angle in degrees (90 = head on), calculated from tag position + distance
+    private int targetXPixels = HUSKYLENS_WIDTH / 2;  // Dynamic target X position based on angle
 
     // Shooter constants - RPM tolerance for auto transfer
     private static final double RPM_TOLERANCE_PERCENT = 0.05;  // 5% tolerance
@@ -240,8 +250,40 @@ public class HybridPIDPowerTest extends OpMode {
                 detectedDistance = directDistance;  // Fallback if too close
             }
 
-            // Auto-aim calculation: calculate rotation needed to center tag at TARGET_X_PIXELS
-            double aimError = detectedTagX - TARGET_X_PIXELS;  // Positive = tag is to the right of target
+            // Calculate horizontal approach angle from tag position and distance
+            // Using the tag's X position on screen and the distance, we can calculate
+            // the actual horizontal angle to the goal using trigonometry.
+            //
+            // The key insight: the tag's pixel offset from center corresponds to an angle,
+            // and combined with distance, we can find the lateral offset, then the approach angle.
+            //
+            // 90 degrees = facing goal head-on
+            // <90 degrees = goal is to our right (approaching from left side of field)
+            // >90 degrees = goal is to our left (approaching from right side of field)
+
+            // Calculate angle offset from center of camera view
+            double pixelOffsetFromCenter = detectedTagX - (HUSKYLENS_WIDTH / 2.0);  // -160 to +160
+            double angleOffsetRadians = Math.toRadians((pixelOffsetFromCenter / (HUSKYLENS_WIDTH / 2.0)) * (HUSKYLENS_HFOV_DEGREES / 2.0));
+
+            // Calculate lateral distance to goal (positive = goal is to the right of camera center)
+            double lateralDistance = detectedDistance * Math.tan(angleOffsetRadians);
+
+            // The approach angle is based on where the goal is relative to straight ahead
+            // If goal is to our right (positive lateral), we're approaching from the left, angle > 90
+            // If goal is to our left (negative lateral), we're approaching from the right, angle < 90
+            // Use atan2 to get the angle: 90 + degrees offset
+            double lateralAngleDegrees = Math.toDegrees(Math.atan2(lateralDistance, detectedDistance));
+            approachAngle = 90.0 + lateralAngleDegrees;
+
+            // Clamp angle to lookup table range
+            double clampedAngle = Range.clip(approachAngle, 45.0, 135.0);
+
+            // Calculate target X percent based on approach angle using interpolation
+            double targetXPercent = interpolateAngleToTarget(clampedAngle);
+            targetXPixels = (int)(HUSKYLENS_WIDTH * targetXPercent);
+
+            // Auto-aim calculation: calculate rotation needed to center tag at dynamic targetXPixels
+            double aimError = detectedTagX - targetXPixels;  // Positive = tag is to the right of target
             isAimed = Math.abs(aimError) <= AIM_TOLERANCE_PIXELS;
 
             if (autoAimEnabled && !isAimed) {
@@ -411,7 +453,8 @@ public class HybridPIDPowerTest extends OpMode {
         telemetry.addData("Tag Detected", tagDetected);
         if (tagDetected) {
             telemetry.addData("Distance (in)", "%.1f", detectedDistance);
-            telemetry.addData("Tag X Position", "%d (target: %d)", detectedTagX, TARGET_X_PIXELS);
+            telemetry.addData("Approach Angle", "%.1f°", approachAngle);
+            telemetry.addData("Tag X Position", "%d (target: %d)", detectedTagX, targetXPixels);
             telemetry.addData("Aimed", isAimed ? "YES" : "NO");
         }
         telemetry.addData("Auto-Aim", autoAimEnabled ? "ENABLED (Y to toggle)" : "DISABLED (Y to toggle)");
@@ -472,5 +515,41 @@ public class HybridPIDPowerTest extends OpMode {
 
         // Fallback (should never reach here)
         return new double[] {0.15, 0.0};
+    }
+
+    /**
+     * Interpolates between angle lookup table entries to get target X percent
+     * based on detected approach angle. Returns target X position as percent from left (0.0 to 1.0).
+     */
+    private double interpolateAngleToTarget(double angle) {
+        // If angle is less than minimum, use minimum value
+        if (angle <= ANGLE_TO_TARGET_LOOKUP[0][0]) {
+            return ANGLE_TO_TARGET_LOOKUP[0][1];
+        }
+
+        // If angle is greater than maximum, use maximum value
+        int lastIndex = ANGLE_TO_TARGET_LOOKUP.length - 1;
+        if (angle >= ANGLE_TO_TARGET_LOOKUP[lastIndex][0]) {
+            return ANGLE_TO_TARGET_LOOKUP[lastIndex][1];
+        }
+
+        // Find the two entries to interpolate between
+        for (int i = 0; i < ANGLE_TO_TARGET_LOOKUP.length - 1; i++) {
+            double angle1 = ANGLE_TO_TARGET_LOOKUP[i][0];
+            double angle2 = ANGLE_TO_TARGET_LOOKUP[i + 1][0];
+
+            if (angle >= angle1 && angle <= angle2) {
+                // Calculate interpolation factor (0.0 to 1.0)
+                double factor = (angle - angle1) / (angle2 - angle1);
+
+                // Interpolate target X percent
+                double target1 = ANGLE_TO_TARGET_LOOKUP[i][1];
+                double target2 = ANGLE_TO_TARGET_LOOKUP[i + 1][1];
+                return target1 + factor * (target2 - target1);
+            }
+        }
+
+        // Fallback (should never reach here)
+        return 0.75;  // Default to center-ish
     }
 }
