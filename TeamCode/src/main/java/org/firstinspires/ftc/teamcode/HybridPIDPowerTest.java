@@ -245,7 +245,10 @@ public class HybridPIDPowerTest extends OpMode {
 
             // Apply hood positions
             leftHoodAdjustment.setPosition(leftHoodPosition);
-            rightHoodAdjustment.setPosition(1.0 - leftHoodPosition);  // Mirror for right hood
+            // Map left hood to right hood: left 0.05 -> right 0.25, left 0.3 -> right 0.0
+            double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
+            rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
+            rightHoodAdjustment.setPosition(rightHoodPosition);
         }
 
         // Toggle auto-aim with Y button
@@ -344,20 +347,24 @@ public class HybridPIDPowerTest extends OpMode {
 
         // ========== HOOD ADJUSTMENT CONTROL (Controller 1 D-Pad) ==========
 
-        // Right D-Pad: Increase leftHoodAdjustment by 0.05, decrease rightHoodAdjustment by 0.05
+        // Right D-Pad: Increase leftHoodAdjustment by 0.05
         if (gamepad1.dpad_right && !lastDpadRightState) {
-            leftHoodPosition = Range.clip(leftHoodPosition + 0.05, 0.0, 1.0);
-            rightHoodPosition = Range.clip(rightHoodPosition - 0.05, 0.0, 1.0);
+            leftHoodPosition = Range.clip(leftHoodPosition + 0.05, 0.05, 0.3);
             leftHoodAdjustment.setPosition(leftHoodPosition);
+            // Map left hood to right hood: left 0.05 -> right 0.25, left 0.3 -> right 0.0
+            double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * 0.25;
+            rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
             rightHoodAdjustment.setPosition(rightHoodPosition);
         }
         lastDpadRightState = gamepad1.dpad_right;
 
-        // Left D-Pad: Decrease leftHoodAdjustment by 0.05, increase rightHoodAdjustment by 0.05
+        // Left D-Pad: Decrease leftHoodAdjustment by 0.05
         if (gamepad1.dpad_left && !lastDpadLeftState) {
-            leftHoodPosition = Range.clip(leftHoodPosition - 0.05, 0.0, 1.0);
-            rightHoodPosition = Range.clip(rightHoodPosition + 0.05, 0.0, 1.0);
+            leftHoodPosition = Range.clip(leftHoodPosition - 0.05, 0.05, 0.3);
             leftHoodAdjustment.setPosition(leftHoodPosition);
+            // Map left hood to right hood: left 0.05 -> right 0.25, left 0.3 -> right 0.0
+            double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * 0.25;
+            rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
             rightHoodAdjustment.setPosition(rightHoodPosition);
         }
         lastDpadLeftState = gamepad1.dpad_left;
@@ -382,7 +389,7 @@ public class HybridPIDPowerTest extends OpMode {
 
         telemetry.addData("--- Hood ---", "");
         telemetry.addData("Left Hood Position", "%.2f", leftHoodPosition);
-        telemetry.addData("Right Hood Position", "%.2f", 1.0 - leftHoodPosition);
+        telemetry.addData("Right Hood Position", "%.2f", rightHoodPosition);
         telemetry.addData("Transfer Open", transfersOpen);
         telemetry.update();
     }
