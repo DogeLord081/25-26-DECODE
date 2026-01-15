@@ -48,6 +48,47 @@ public class Tele extends OpMode {
     private static final double LB_MULTIPLIER = 1.0;            // = 1.0
     private static final double RB_MULTIPLIER = 0.3425 / 0.41;  // ≈ 0.8354
 
+    // ========== HUSKYLENS & AUTO-AIM CONSTANTS ==========
+    private static final double TAG_WIDTH_INCHES = 6.5;
+    private static final double FOCAL_LENGTH = 300.461;
+    private static final double HEIGHT_DIFF_INCHES = 18.0;
+    private static final int HUSKYLENS_WIDTH = 320;  // HuskyLens resolution width
+    private static final double HUSKYLENS_HFOV_DEGREES = 60.0;  // Horizontal field of view
+
+    // Auto-aim target position - dynamically calculated based on approach angle
+    // Angle lookup: {angle (degrees), target X percent from left}
+    private static final double[][] ANGLE_TO_TARGET_LOOKUP = {
+        {45, 0.90},   // 45 degrees to the left → tag at 90% from left
+        {90, 0.75},   // Head on (90 degrees) → tag at 75% from left
+        {135, 0.60}   // 45 degrees to the right → tag at 60% from left
+    };
+    private static final double AIM_TOLERANCE_PIXELS = 15.0;
+    private static final double AIM_KP = 0.003;
+
+    // ========== SHOOTER LOOKUP TABLE & PID CONSTANTS ==========
+    private static final double MAX_SHOOTER_RPM = 4900.0;
+    private static final double[][] SHOOTER_LOOKUP_TABLE = {
+        {18, 0.05, 1800},
+        {24, 0.05, 1800},
+        {30, 0.05, 1800},
+        {36, 0.30, 1800},
+        {42, 0.30, 1800},
+        {48, 0.20, 1850},
+        {54, 0.30, 1850},
+        {60, 0.30, 1900},
+        {66, 0.30, 2000},
+        {72, 0.30, 2050},
+        {118, 0.30, 2250}
+    };
+
+    // Shooter PID constants
+    private static final double SHOOTER_KP = 0.0002;
+    private static final double SHOOTER_KI = 0.00001;
+    private static final double SHOOTER_KD = 0.00001;
+    private static final double SHOOTER_KF = 1.0 / MAX_SHOOTER_RPM;
+    private static final double SHOOTER_TICKS_PER_REV = 28.0;
+    private static final double RPM_TOLERANCE_PERCENT = 0.05;  // 5% tolerance
+
     // ========== CONTROLLER 1 (DRIVER) STATE ==========
     // Intake toggle state (Right Bumper)
     private boolean intakeToggleOn = false;
@@ -56,6 +97,28 @@ public class Tele extends OpMode {
     // Auto-Aim toggle state (Right Trigger)
     private boolean autoAimEnabled = false;
     private boolean lastGamepad1RightTriggerState = false;
+
+    // ========== AUTO-AIM STATE ==========
+    private double detectedDistance = 0.0;
+    private int detectedTagX = -1;
+    private boolean tagDetected = false;
+    private double autoAimRotation = 0.0;
+    private boolean isAimed = false;
+    private double approachAngle = 90.0;
+    private int targetXPixels = HUSKYLENS_WIDTH / 2;
+
+    // ========== SHOOTER STATE ==========
+    private double targetShooterRPM = 0.0;
+    private double shooterPower = 0.0;
+    private double shooterRPM = 0.0;
+    private int lastShooterEncoderPosition = 0;
+    private ElapsedTime velocityTimer = new ElapsedTime();
+    private double shooterIntegral = 0.0;
+    private double shooterLastError = 0.0;
+
+    // Hood adjustment positions
+    private double leftHoodPosition = 0.15;
+    private double rightHoodPosition = 0.15;
 
     // ========== CONTROLLER 2 (OPERATOR) STATE ==========
     // Trapdoor toggles (Face Buttons)
@@ -82,7 +145,7 @@ public class Tele extends OpMode {
     private boolean lastGamepad2LeftBumperState = false;
     private boolean lastGamepad2RightBumperState = false;
 
-    // Shooter speed toggle (Left Trigger)
+    // Shooter speed toggle (Left Trigger) - now enables/disables auto shooter
     private boolean shooterSpeedOn = false;
     private boolean lastGamepad2LeftTriggerState = false;
 
@@ -92,7 +155,9 @@ public class Tele extends OpMode {
 
     // Timer for shooting sequence
     private ElapsedTime shootSequenceTimer = new ElapsedTime();
+    private ElapsedTime transferTimer = new ElapsedTime();
     private boolean shootSequenceActive = false;
+    private boolean autoTransferTriggered = false;  // For RPM-based auto transfer
     private boolean distanceCheckPassed = false; // Tracks if ball was detected at 3000ms
     private boolean kickLeft = false; // Track if left side should be kicked
     private boolean kickRight = false; // Track if right side should be kicked
@@ -165,12 +230,22 @@ public class Tele extends OpMode {
         rightBack.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         leftFront.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         leftBack.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        shooter.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         telemetry.addData("Status", "Initialized");
 
         leftFront.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         leftBack.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         rightFront.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         rightBack.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        shooter.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+
+        // Initialize velocity tracking for shooter
+        velocityTimer.reset();
+        lastShooterEncoderPosition = 0;
+
+        // Initialize hood adjustments
+        leftHoodAdjustment.setPosition(leftHoodPosition);
+        rightHoodAdjustment.setPosition(rightHoodPosition);
 
         leftLift.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         rightLift.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -221,28 +296,93 @@ public class Tele extends OpMode {
         leftBackPower *= LB_MULTIPLIER;
         rightBackPower *= RB_MULTIPLIER;
 
-        // write the values to the motors
-        rightFront.setPower(rightFrontPower);
-        leftFront.setPower(leftFrontPower);
-        leftBack.setPower(leftBackPower);
-        rightBack.setPower(rightBackPower);
+        // ========== HUSKYLENS APRILTAG DETECTION & AUTO-AIM ==========
+        HuskyLens.Block[] blocks = huskyLens.blocks();
+        tagDetected = false;
+        detectedDistance = 0.0;
+        detectedTagX = -1;
+        isAimed = false;
 
-        // Right Trigger (Toggle): Auto-Aim / Position - TODO: Implement AprilTag centering
+        if (blocks.length > 0) {
+            // Use the first detected tag
+            HuskyLens.Block block = blocks[0];
+            tagDetected = true;
+            detectedTagX = block.x;
+
+            // Calculate distance from tag width
+            double directDistance = (TAG_WIDTH_INCHES * FOCAL_LENGTH) / block.width;
+
+            // Calculate horizontal distance using Pythagorean theorem
+            if (directDistance > HEIGHT_DIFF_INCHES) {
+                detectedDistance = Math.sqrt(Math.pow(directDistance, 2) - Math.pow(HEIGHT_DIFF_INCHES, 2));
+            } else {
+                detectedDistance = directDistance;
+            }
+
+            // Calculate horizontal approach angle from tag position and distance
+            double pixelOffsetFromCenter = detectedTagX - (HUSKYLENS_WIDTH / 2.0);
+            double angleOffsetRadians = Math.toRadians((pixelOffsetFromCenter / (HUSKYLENS_WIDTH / 2.0)) * (HUSKYLENS_HFOV_DEGREES / 2.0));
+            double lateralDistance = detectedDistance * Math.tan(angleOffsetRadians);
+            double lateralAngleDegrees = Math.toDegrees(Math.atan2(lateralDistance, detectedDistance));
+            approachAngle = 90.0 + lateralAngleDegrees;
+
+            // Clamp angle to lookup table range
+            double clampedAngle = Range.clip(approachAngle, 45.0, 135.0);
+
+            // Calculate target X percent based on approach angle using interpolation
+            double targetXPercent = interpolateAngleToTarget(clampedAngle);
+            targetXPixels = (int)(HUSKYLENS_WIDTH * targetXPercent);
+
+            // Auto-aim calculation
+            double aimError = detectedTagX - targetXPixels;
+            isAimed = Math.abs(aimError) <= AIM_TOLERANCE_PIXELS;
+
+            if (autoAimEnabled && !isAimed) {
+                autoAimRotation = aimError * AIM_KP;
+                autoAimRotation = Range.clip(autoAimRotation, -0.3, 0.3);
+            } else {
+                autoAimRotation = 0.0;
+            }
+
+            // Apply lookup table values based on distance - always calculate target RPM when tag detected
+            double[] lookupValues = interpolateLookupTable(detectedDistance);
+            leftHoodPosition = lookupValues[0];
+            targetShooterRPM = lookupValues[1];
+
+            // Apply hood positions only when shooter is enabled
+            if (shooterSpeedOn) {
+                leftHoodAdjustment.setPosition(leftHoodPosition);
+                double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
+                rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
+                rightHoodAdjustment.setPosition(rightHoodPosition);
+            }
+        }
+
+        // Right Trigger (Toggle): Auto-Aim / Position
         if (gamepad1.right_trigger > 0.5 && !lastGamepad1RightTriggerState) {
             autoAimEnabled = !autoAimEnabled;
         }
         lastGamepad1RightTriggerState = gamepad1.right_trigger > 0.5;
 
-        // Auto-aim execution placeholder
-        if (autoAimEnabled) {
-            // autoAimToTarget();
-        } else {
-            // write the values to the motors (manual control)
-            rightFront.setPower(rightFrontPower);
-            leftFront.setPower(leftFrontPower);
-            leftBack.setPower(leftBackPower);
-            rightBack.setPower(rightBackPower);
+        // Apply auto-aim rotation to drive motors if enabled
+        if (autoAimEnabled && tagDetected && !isAimed) {
+            leftFrontPower += (float) autoAimRotation;
+            rightFrontPower -= (float) autoAimRotation;
+            leftBackPower += (float) autoAimRotation;
+            rightBackPower -= (float) autoAimRotation;
+
+            // Re-clip values after adding auto-aim
+            rightFrontPower = (float) Range.clip(rightFrontPower, -1.0, 1.0);
+            leftFrontPower = (float) Range.clip(leftFrontPower, -1.0, 1.0);
+            leftBackPower = (float) Range.clip(leftBackPower, -1.0, 1.0);
+            rightBackPower = (float) Range.clip(rightBackPower, -1.0, 1.0);
         }
+
+        // Set motor powers
+        rightFront.setPower(rightFrontPower);
+        leftFront.setPower(leftFrontPower);
+        leftBack.setPower(leftBackPower);
+        rightBack.setPower(rightBackPower);
 
         // --- Intake Controls (Controller 1) ---
         // Right Bumper: Intake Toggle (Press once to turn ON, press again to stop)
@@ -353,39 +493,123 @@ public class Tele extends OpMode {
         lastGamepad2RightBumperState = gamepad2.right_bumper;
 
         // --- Triggers ---
-        // Left Trigger: Shooter speed toggle
+        // Left Trigger: Shooter speed toggle (enables/disables auto shooter)
         boolean leftTriggerPressed = gamepad2.left_trigger > 0.5;
         if (leftTriggerPressed && !lastGamepad2LeftTriggerState) {
             shooterSpeedOn = !shooterSpeedOn;
+            if (!shooterSpeedOn) {
+                // Reset PID state when shooter is turned off
+                targetShooterRPM = 0.0;
+                shooterIntegral = 0.0;
+                shooterLastError = 0.0;
+            }
         }
         lastGamepad2LeftTriggerState = leftTriggerPressed;
 
-        // Set shooter power based on toggle
-        if (shooterSpeedOn) {
-            shooter.setPower(0.25);
-        } else {
-            shooter.setPower(0.0);
+        // ========== SHOOTER RPM TRACKING AND PID CONTROL ==========
+        // Calculate shooter RPM from encoder
+        int currentShooterPosition = shooter.getCurrentPosition();
+        double deltaTime = velocityTimer.seconds();
+
+        if (deltaTime > 0.02) {  // Update velocity every 20ms
+            int deltaTicks = currentShooterPosition - lastShooterEncoderPosition;
+            double ticksPerSecond = Math.abs(deltaTicks / deltaTime);
+            // Convert ticks/second to RPM: (ticks/sec) / (ticks/rev) * 60 = RPM
+            shooterRPM = (ticksPerSecond / SHOOTER_TICKS_PER_REV) * 60.0;
+            lastShooterEncoderPosition = currentShooterPosition;
+            velocityTimer.reset();
         }
 
-        // Right Trigger: Backup auto shoot (always left trapdoor/kicker arm, independent of color)
-        // Also stops active sequence if pressed during one
+        // PID control for shooter RPM
+        if (shooterSpeedOn && targetShooterRPM > 0) {
+            double error = targetShooterRPM - shooterRPM;
+
+            // Integrate error (with anti-windup)
+            shooterIntegral += error * deltaTime;
+            shooterIntegral = Range.clip(shooterIntegral, -5000, 5000);
+
+            // Calculate derivative
+            double derivative = (error - shooterLastError) / deltaTime;
+            shooterLastError = error;
+
+            // Calculate feedforward (base power to reach target RPM)
+            double feedforward = targetShooterRPM * SHOOTER_KF;
+
+            // Calculate PID output
+            double pidOutput = (SHOOTER_KP * error) + (SHOOTER_KI * shooterIntegral) + (SHOOTER_KD * derivative);
+
+            // Combine feedforward and PID
+            shooterPower = feedforward + pidOutput;
+            shooterPower = Range.clip(shooterPower, 0.0, 1.0);
+        } else {
+            // Reset PID state when shooter is off
+            shooterPower = 0.0;
+            shooterIntegral = 0.0;
+            shooterLastError = 0.0;
+        }
+
+        // Set shooter power
+        shooter.setPower(shooterPower);
+
+        // Check if RPM is within tolerance for auto transfer
+        double rpmLowerBound = targetShooterRPM * (1.0 - RPM_TOLERANCE_PERCENT);
+        double rpmUpperBound = targetShooterRPM * (1.0 + RPM_TOLERANCE_PERCENT);
+        boolean rpmInRange = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
+
+        // Right Trigger: Auto-shoot sequence
+        // When pressed: enables shooter, waits for RPM to be in range, then executes shoot sequence
         boolean rightTriggerPressed = gamepad2.right_trigger > 0.5;
         if (rightTriggerPressed && !lastGamepad2RightTriggerState) {
             if (shootSequenceActive) {
+                // If sequence is active, stop it
                 stopShootSequence();
-            } else {
-                startShootSequence();
+                shooterSpeedOn = false;
+            } else if (tagDetected) {
+                // Enable shooter and wait for RPM - sequence will start automatically when ready
+                shooterSpeedOn = true;
             }
         }
         lastGamepad2RightTriggerState = rightTriggerPressed;
+
+        // Auto-start shoot sequence when shooter is on, RPM is in range, and not already shooting
+        if (shooterSpeedOn && rpmInRange && !shootSequenceActive && tagDetected) {
+            startShootSequence();
+        }
 
         if (shootSequenceActive) {
             executeShootSequence();
         }
 
+        // Close transfer after 2.5 seconds if auto transfer was triggered
+        if (autoTransferTriggered && transferTimer.seconds() >= 2.5) {
+            autoTransferTriggered = false;
+            transfersOpen = false;
+            leftTransfer.setPosition(0.0);
+            rightTransfer.setPosition(0.5);
+        }
+
         // ========== TELEMETRY ==========
         telemetry.addData("--- DRIVER (Gamepad 1) ---", "");
         telemetry.addData("Intake Toggle", intakeToggleOn ? "ON" : "OFF");
+        telemetry.addData("Auto-Aim", autoAimEnabled ? "ENABLED" : "DISABLED");
+
+        telemetry.addData("--- APRILTAG ---", "");
+        telemetry.addData("Tag Detected", tagDetected);
+        if (tagDetected) {
+            telemetry.addData("Distance (in)", "%.1f", detectedDistance);
+            telemetry.addData("Approach Angle", "%.1f°", approachAngle);
+            telemetry.addData("Tag X Position", "%d (target: %d)", detectedTagX, targetXPixels);
+            telemetry.addData("Aimed", isAimed ? "YES" : "NO");
+        }
+
+        telemetry.addData("--- SHOOTER ---", "");
+        telemetry.addData("Shooter Enabled", shooterSpeedOn ? "ON" : "OFF");
+        telemetry.addData("Target RPM", "%.0f", targetShooterRPM);
+        telemetry.addData("Actual RPM", "%.0f", shooterRPM);
+        telemetry.addData("Shooter Power", "%.1f%%", shooterPower * 100);
+        telemetry.addData("RPM Range", "%.0f - %.0f", rpmLowerBound, rpmUpperBound);
+        telemetry.addData("RPM In Range", rpmInRange ? "YES - Press RT to shoot!" : "NO");
+        telemetry.addData("Hood Position", "L:%.2f R:%.2f", leftHoodPosition, rightHoodPosition);
 
         telemetry.addData("--- OPERATOR (Gamepad 2) ---", "");
         telemetry.addData("Left Trapdoor", leftTrapdoorOpen ? "OPEN" : "CLOSED");
@@ -394,7 +618,6 @@ public class Tele extends OpMode {
         telemetry.addData("Transfers", transfersOpen ? "OPEN" : "CLOSED");
         telemetry.addData("Left Kicker Arm", leftKickerArmOpen ? "OPEN" : "CLOSED");
         telemetry.addData("Right Kicker Arm", rightKickerArmOpen ? "OPEN" : "CLOSED");
-        telemetry.addData("Shooter Speed", shooterSpeedOn ? "ON" : "OFF");
         telemetry.addData("Color Selected", colorPurpleSelected ? "PURPLE" : (colorGreenSelected ? "GREEN" : "NONE"));
 
         // Distance Sensor Telemetry
@@ -409,52 +632,6 @@ public class Tele extends OpMode {
                 leftHSV[0], leftHSV[1], leftHSV[2], ((DistanceSensor) colorSensorLeft).getDistance(DistanceUnit.CM));
         telemetry.addData("Right Color Sensor (H,S,V,D)", "(%.1f, %.2f, %.2f, %.3f)",
                 rightHSV[0], rightHSV[1], rightHSV[2], ((DistanceSensor) colorSensorRight).getDistance(DistanceUnit.CM));
-
-        // HuskyLens AprilTag Detection and Pose Estimation
-        telemetry.addData("--- HUSKYLENS APRILTAGS ---", "");
-        HuskyLens.Block[] blocks = huskyLens.blocks();
-        telemetry.addData("AprilTags Detected", blocks.length);
-        telemetry.addData("Note", "ID=0 means unlearned. Learn tags via HuskyLens button.");
-
-        // HuskyLens camera parameters (approximate for pose estimation)
-        // HuskyLens has 320x240 resolution with ~60 degree horizontal FOV
-        final double HUSKYLENS_IMAGE_WIDTH = 320.0;
-        final double HUSKYLENS_IMAGE_HEIGHT = 240.0;
-        final double HUSKYLENS_HORIZONTAL_FOV_DEG = 60.0; // Approximate horizontal field of view
-        final double APRILTAG_REAL_SIZE_CM = 6.35; // Standard FTC AprilTag is 6.35 cm (2.5 inches)
-
-        for (int i = 0; i < blocks.length; i++) {
-            HuskyLens.Block block = blocks[i];
-
-            // Block contains: id, x (center), y (center), width, height
-            int tagId = block.id;
-            int centerX = block.x;
-            int centerY = block.y;
-            int tagWidth = block.width;
-            int tagHeight = block.height;
-
-            // Estimate distance based on apparent size (using width as reference)
-            // distance = (realSize * focalLength) / apparentSize
-            // focalLength (in pixels) ≈ (imageWidth / 2) / tan(FOV/2)
-            double focalLengthPixels = (HUSKYLENS_IMAGE_WIDTH / 2.0) / Math.tan(Math.toRadians(HUSKYLENS_HORIZONTAL_FOV_DEG / 2.0));
-            double estimatedDistanceCm = (APRILTAG_REAL_SIZE_CM * focalLengthPixels) / tagWidth;
-
-            // Estimate horizontal angle/rotation (yaw) based on X position
-            // Center of image = 0 degrees, left = negative, right = positive
-            double offsetFromCenterPixels = centerX - (HUSKYLENS_IMAGE_WIDTH / 2.0);
-            double estimatedYawDeg = Math.toDegrees(Math.atan(offsetFromCenterPixels / focalLengthPixels));
-
-            // Estimate vertical angle (pitch) based on Y position
-            double verticalOffsetPixels = centerY - (HUSKYLENS_IMAGE_HEIGHT / 2.0);
-            double focalLengthVertical = (HUSKYLENS_IMAGE_HEIGHT / 2.0) / Math.tan(Math.toRadians(HUSKYLENS_HORIZONTAL_FOV_DEG * (HUSKYLENS_IMAGE_HEIGHT / HUSKYLENS_IMAGE_WIDTH) / 2.0));
-            double estimatedPitchDeg = Math.toDegrees(Math.atan(verticalOffsetPixels / focalLengthVertical));
-
-            telemetry.addData("Tag " + i + " Info", block.toString());
-            telemetry.addData("  Learned ID", tagId);
-            telemetry.addData("  Center", "(%d, %d), Size: %dx%d", centerX, centerY, tagWidth, tagHeight);
-            telemetry.addData("  Pose Est", "Dist: %.1f cm, Yaw: %.1f°, Pitch: %.1f°",
-                    estimatedDistanceCm, estimatedYawDeg, estimatedPitchDeg);
-        }
 
         telemetry.update();
     }
@@ -695,6 +872,85 @@ public class Tele extends OpMode {
         // Reset kicker arms
         leftKickerArm.setPosition(0.0);
         rightKickerArm.setPosition(0.5);
+    }
+
+    /**
+     * Interpolates between lookup table entries to get hood position and shooter RPM
+     * based on detected distance. Returns {hoodPosition, targetRPM}.
+     */
+    private double[] interpolateLookupTable(double distance) {
+        // If distance is less than minimum, use minimum values
+        if (distance <= SHOOTER_LOOKUP_TABLE[0][0]) {
+            return new double[] {SHOOTER_LOOKUP_TABLE[0][1], SHOOTER_LOOKUP_TABLE[0][2]};
+        }
+
+        // If distance is greater than maximum, use maximum values
+        int lastIndex = SHOOTER_LOOKUP_TABLE.length - 1;
+        if (distance >= SHOOTER_LOOKUP_TABLE[lastIndex][0]) {
+            return new double[] {SHOOTER_LOOKUP_TABLE[lastIndex][1], SHOOTER_LOOKUP_TABLE[lastIndex][2]};
+        }
+
+        // Find the two entries to interpolate between
+        for (int i = 0; i < SHOOTER_LOOKUP_TABLE.length - 1; i++) {
+            double dist1 = SHOOTER_LOOKUP_TABLE[i][0];
+            double dist2 = SHOOTER_LOOKUP_TABLE[i + 1][0];
+
+            if (distance >= dist1 && distance <= dist2) {
+                // Calculate interpolation factor (0.0 to 1.0)
+                double factor = (distance - dist1) / (dist2 - dist1);
+
+                // Interpolate hood position
+                double hood1 = SHOOTER_LOOKUP_TABLE[i][1];
+                double hood2 = SHOOTER_LOOKUP_TABLE[i + 1][1];
+                double interpolatedHood = hood1 + factor * (hood2 - hood1);
+
+                // Interpolate shooter RPM
+                double rpm1 = SHOOTER_LOOKUP_TABLE[i][2];
+                double rpm2 = SHOOTER_LOOKUP_TABLE[i + 1][2];
+                double interpolatedRPM = rpm1 + factor * (rpm2 - rpm1);
+
+                return new double[] {interpolatedHood, interpolatedRPM};
+            }
+        }
+
+        // Fallback (should never reach here)
+        return new double[] {0.15, 0.0};
+    }
+
+    /**
+     * Interpolates between angle lookup table entries to get target X percent
+     * based on detected approach angle. Returns target X position as percent from left (0.0 to 1.0).
+     */
+    private double interpolateAngleToTarget(double angle) {
+        // If angle is less than minimum, use minimum value
+        if (angle <= ANGLE_TO_TARGET_LOOKUP[0][0]) {
+            return ANGLE_TO_TARGET_LOOKUP[0][1];
+        }
+
+        // If angle is greater than maximum, use maximum value
+        int lastIndex = ANGLE_TO_TARGET_LOOKUP.length - 1;
+        if (angle >= ANGLE_TO_TARGET_LOOKUP[lastIndex][0]) {
+            return ANGLE_TO_TARGET_LOOKUP[lastIndex][1];
+        }
+
+        // Find the two entries to interpolate between
+        for (int i = 0; i < ANGLE_TO_TARGET_LOOKUP.length - 1; i++) {
+            double angle1 = ANGLE_TO_TARGET_LOOKUP[i][0];
+            double angle2 = ANGLE_TO_TARGET_LOOKUP[i + 1][0];
+
+            if (angle >= angle1 && angle <= angle2) {
+                // Calculate interpolation factor (0.0 to 1.0)
+                double factor = (angle - angle1) / (angle2 - angle1);
+
+                // Interpolate target X percent
+                double target1 = ANGLE_TO_TARGET_LOOKUP[i][1];
+                double target2 = ANGLE_TO_TARGET_LOOKUP[i + 1][1];
+                return target1 + factor * (target2 - target1);
+            }
+        }
+
+        // Fallback (should never reach here)
+        return 0.75;  // Default to center-ish
     }
 }
 
