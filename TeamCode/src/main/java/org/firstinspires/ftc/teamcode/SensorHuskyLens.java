@@ -64,6 +64,21 @@ public class SensorHuskyLens extends LinearOpMode {
 
     private final int READ_PERIOD = 1;
 
+    // TODO: Enter the real-world width of your AprilTag in inches.
+    // This example assumes a 2-inch tag.
+    private final double TAG_WIDTH_INCHES = 6.5;
+
+    // TODO: Calibrate your camera's focal length using a known distance and tag width.
+    // Formula: focalLength = (pixelWidth * knownDistance) / tagWidth
+    // For example, if a 2" tag appears 50 pixels wide at 10 inches distance:
+    // focalLength = (50 * 10) / 2 = 250.
+    // Note: Measure the "knownDistance" from the camera lens processing center to the tag.
+    // Ideally, perform calibration with the tag centered in the image.
+    private final double FOCAL_LENGTH = 300.461;
+
+    // TODO: Enter the vertical height difference between the camera lens and the tag center in inches.
+    private final double HEIGHT_DIFF_INCHES = 18.0; // 1.5 feet
+
     private HuskyLens huskyLens;
 
     @Override
@@ -147,6 +162,21 @@ public class SensorHuskyLens extends LinearOpMode {
                 telemetry.addData("  Learned ID", blocks[i].id);
                 telemetry.addData("  Position", "x=%d, y=%d", blocks[i].x, blocks[i].y);
                 telemetry.addData("  Size", "w=%d, h=%d", blocks[i].width, blocks[i].height);
+                telemetry.addData("  Pixel Width", blocks[i].width);
+
+                double distance = (TAG_WIDTH_INCHES * FOCAL_LENGTH) / blocks[i].width;
+                // This estimates the direct distance from the lens to the tag (Hypotenuse).
+                telemetry.addData("  Direct Distance", "%.2f inches", distance);
+
+                // Calculate horizontal distance (floor distance) using Pythagorean theorem
+                // dist^2 = horizontal^2 + height^2  =>  horizontal = sqrt(dist^2 - height^2)
+                if (distance > HEIGHT_DIFF_INCHES) {
+                    double horizontalDistance = Math.sqrt(Math.pow(distance, 2) - Math.pow(HEIGHT_DIFF_INCHES, 2));
+                    telemetry.addData("  Horizontal Distance", "%.2f inches", horizontalDistance);
+                } else {
+                    telemetry.addData("  Horizontal Distance", "Too close / Height error (Dist < Height)");
+                }
+
                 /*
                  * Here inside the FOR loop, you could save or evaluate specific info for the currently recognized Bounding Box:
                  * - blocks[i].width and blocks[i].height   (size of box, in pixels)
