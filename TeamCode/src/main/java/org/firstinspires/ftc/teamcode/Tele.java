@@ -166,6 +166,7 @@ public class Tele extends OpMode {
     private boolean kickRight = false; // Track if right side should be kicked
     private boolean singleBallMode = false; // True if proximity > 6.5 (only one ball)
     private boolean trapdoorsOpenedForSingleBall = false; // Track if trapdoors were opened in single ball mode
+    private boolean manualBothTrapdoorsOverride = false; // Track if Y button (both trapdoors) was pressed during auto shoot
 
     // Debug timing
     private ElapsedTime debugTimer = new ElapsedTime();
@@ -443,6 +444,10 @@ public class Tele extends OpMode {
                 rightTrapdoor.setPosition(0.2);
                 leftTrapdoorOpen = true;
                 rightTrapdoorOpen = true;
+                // If during auto shoot sequence, set the manual override flag
+                if (shootSequenceActive) {
+                    manualBothTrapdoorsOverride = true;
+                }
             } else {
                 rightTrapdoor.setPosition(0.1);
                 leftTrapdoor.setPosition(0.1);
@@ -680,6 +685,7 @@ public class Tele extends OpMode {
     private void startShootSequence() {
         shootSequenceActive = true;
         shootSequenceTimer.reset();
+        manualBothTrapdoorsOverride = false; // Reset manual override flag
 
         // Color detection logic
         float[] leftHSV = new float[3];
@@ -722,17 +728,14 @@ public class Tele extends OpMode {
         }
 
         if (singleBallMode) {
-            // Single ball mode: stop intake, open both trapdoors
+            // Single ball mode: stop intake, open only left trapdoor
             intake.setPower(0.0);
             leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.2);
+            rightTrapdoor.setPosition(0.0);  // Keep right closed (matches X button left trapdoor logic)
         } else {
-            // Normal mode: Set trapdoors based on determination using existing button logic patterns
-            if (openLeft && openRight) {
-                // Both Trapdoors Open logic (matches Y button)
-                leftTrapdoor.setPosition(0.0);
-                rightTrapdoor.setPosition(0.2);
-            } else if (openLeft) {
+            // Normal mode: Only open ONE trapdoor based on color detection (never both automatically)
+            // If both match, prioritize left
+            if (openLeft) {
                 // Left Trapdoor Open logic (matches X button)
                 leftTrapdoor.setPosition(0.0);
                 rightTrapdoor.setPosition(0.0);
@@ -837,6 +840,7 @@ public class Tele extends OpMode {
             kickRight = false;
             singleBallMode = false;
             trapdoorsOpenedForSingleBall = false;
+            manualBothTrapdoorsOverride = false;
         }
     }
 
@@ -848,6 +852,7 @@ public class Tele extends OpMode {
         kickRight = false;
         singleBallMode = false;
         trapdoorsOpenedForSingleBall = false;
+        manualBothTrapdoorsOverride = false;
 
         // Reset servos to closed positions
         leftTrapdoor.setPosition(0.2);
@@ -878,16 +883,16 @@ public class Tele extends OpMode {
         // Do NOT re-read color sensors - keep using the same kickLeft/kickRight values
         // that were originally determined until the ball passes the distance sensor check
 
-        if (singleBallMode) {
-            // Single ball mode: open both trapdoors again
+        // Check if manual override was used - if so, open both trapdoors
+        if (manualBothTrapdoorsOverride) {
             leftTrapdoor.setPosition(0.0);
             rightTrapdoor.setPosition(0.2);
-        } else if (kickLeft && kickRight) {
-            // Both sides (shouldn't happen since we prioritize left, but handle it)
+        } else if (singleBallMode) {
+            // Single ball mode: open only left trapdoor
             leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.2);
+            rightTrapdoor.setPosition(0.0);
         } else if (kickLeft) {
-            // Left side
+            // Left side only (prioritized when both match)
             leftTrapdoor.setPosition(0.0);
             rightTrapdoor.setPosition(0.0);
         } else if (kickRight) {
