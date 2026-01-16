@@ -572,14 +572,25 @@ public class Tele extends OpMode {
         boolean rpmInRange = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
 
         // Right Trigger: Auto-shoot sequence
-        // Only starts if: tag detected, aimed, RPM in range, and a color is selected
+        // Starts if a color is selected. Uses tag data if available, otherwise uses fallback defaults.
         boolean rightTriggerPressed = gamepad2.right_trigger > 0.5;
         if (rightTriggerPressed && !lastGamepad2RightTriggerState) {
             if (shootSequenceActive) {
                 // If sequence is active, stop it
                 stopShootSequence();
-            } else if (tagDetected && (colorPurpleSelected || colorGreenSelected) && autoAimEnabled && rpmInRange) {
-                // Only start if: tag detected, color selected, auto-aim enabled, and RPM is ready
+            } else if (colorPurpleSelected || colorGreenSelected) {
+                // Color is selected - start shoot sequence
+                if (!tagDetected || !autoAimEnabled) {
+                    // Tag not detected or auto-aim disabled - use default values
+                    // Set default hood position (0.3 left) and RPM (2000)
+                    leftHoodPosition = 0.3;
+                    leftHoodAdjustment.setPosition(leftHoodPosition);
+                    double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
+                    rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
+                    rightHoodAdjustment.setPosition(rightHoodPosition);
+                    targetShooterRPM = 2000.0;
+                }
+                // If tag detected and auto-aim enabled, use lookup table values (already set by AprilTag detection code)
                 startShootSequence();
             }
         }
@@ -623,8 +634,9 @@ public class Tele extends OpMode {
         telemetry.addData("RPM In Range", rpmInRange ? "YES" : "NO");
         telemetry.addData("Hood Position", "L:%.2f R:%.2f", leftHoodPosition, rightHoodPosition);
         // Show what's needed to shoot
-        boolean readyToShoot = tagDetected && (colorPurpleSelected || colorGreenSelected) && autoAimEnabled && rpmInRange;
-        telemetry.addData("Ready to Shoot", readyToShoot ? "YES - Press RT!" : "NO");
+        boolean readyToShoot = (colorPurpleSelected || colorGreenSelected);
+        String shootMode = (tagDetected && autoAimEnabled) ? "TAG MODE" : "FALLBACK MODE";
+        telemetry.addData("Ready to Shoot", readyToShoot ? ("YES - " + shootMode + " - Press RT!") : "NO - Select Color");
         if (!readyToShoot) {
             String missing = "";
             if (!tagDetected) missing += "Tag ";
