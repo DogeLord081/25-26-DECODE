@@ -145,9 +145,12 @@ public class Tele extends OpMode {
     private boolean lastGamepad2LeftBumperState = false;
     private boolean lastGamepad2RightBumperState = false;
 
-    // Shooter speed toggle (Left Trigger) - now enables/disables auto shooter
+    // Shooter speed toggle (Left Trigger) - keeps shooter at minimum RPM for reduced windup
     private boolean shooterSpeedOn = false;
     private boolean lastGamepad2LeftTriggerState = false;
+
+    // Minimum shooter RPM when idling (for faster windup)
+    private static final double MIN_IDLE_SHOOTER_RPM = 2000;
 
     // Auto shoot (Right Trigger or Button?) - Image says "Auto shoot". Assuming RT based on position.
     // No toggle needed if it's a sequence trigger, but we need debouncing.
@@ -256,24 +259,14 @@ public class Tele extends OpMode {
 
         // ========== CONTROLLER 1: THE DRIVER (Mobility & Acquisition) ==========
 
-        // Get the robot's heading from the IMU
-        double botHeading = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
-
-        // Get joystick inputs
-        double y = -gamepad1.left_stick_y;  // Forward/backward (pushing stick forward gives negative value)
+        // Get joystick inputs (robot-centric driving)
+        double y = gamepad1.left_stick_y;  // Forward/backward (reversed - pushing stick forward goes backward)
         double x = gamepad1.left_stick_x;   // Left/right strafe
-        double yaw = gamepad1.right_stick_x; // Rotation (stays robot-centric)
+        double yaw = gamepad1.right_stick_x; // Rotation
 
-        // Rotate the joystick inputs by the robot's heading
-        // This makes forward on joystick always move the robot away from driver (field-centric)
-        // rotY = new forward/backward, rotX = new strafe
-        double rotX = x * Math.cos(-botHeading) - y * Math.sin(-botHeading);
-        double rotY = x * Math.sin(-botHeading) + y * Math.cos(-botHeading);
-
-        // Use rotated values for axial and lateral movement
-        // rotY is the new forward/backward, rotX is the new strafe
-        float lateral = (float) rotX;
-        float axial = (float) rotY;
+        // Use joystick values directly for robot-centric movement
+        float axial = (float) y;
+        float lateral = (float) x;
 
         // Apply a strafe correction factor (strafing is typically less efficient)
         lateral = lateral * 1.1f;
@@ -344,17 +337,27 @@ public class Tele extends OpMode {
                 autoAimRotation = 0.0;
             }
 
-            // Apply lookup table values based on distance - always calculate target RPM when tag detected
+            // Apply lookup table values based on distance - calculate target RPM when tag detected
             double[] lookupValues = interpolateLookupTable(detectedDistance);
             leftHoodPosition = lookupValues[0];
-            targetShooterRPM = lookupValues[1];
+            double lookupRPM = lookupValues[1];
 
-            // Apply hood positions only when shooter is enabled
-            if (shooterSpeedOn) {
+            // Apply hood positions and set target RPM when auto-aim is enabled and looking at tag
+            if (autoAimEnabled) {
                 leftHoodAdjustment.setPosition(leftHoodPosition);
                 double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
                 rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
                 rightHoodAdjustment.setPosition(rightHoodPosition);
+                // When auto-aim enabled and tag detected, use full RPM from lookup table
+                targetShooterRPM = lookupRPM;
+            } else {
+                // Not auto-aiming, so RPM will be set to idle (if shooter is on) later
+                targetShooterRPM = 0.0;
+            }
+        } else {
+            // No tag detected - if auto-aim is enabled, reset target RPM
+            if (autoAimEnabled) {
+                targetShooterRPM = 0.0;
             }
         }
 
@@ -493,13 +496,12 @@ public class Tele extends OpMode {
         lastGamepad2RightBumperState = gamepad2.right_bumper;
 
         // --- Triggers ---
-        // Left Trigger: Shooter speed toggle (enables/disables auto shooter)
+        // Left Trigger: Shooter speed toggle (keeps shooter at minimum RPM for reduced windup)
         boolean leftTriggerPressed = gamepad2.left_trigger > 0.5;
         if (leftTriggerPressed && !lastGamepad2LeftTriggerState) {
             shooterSpeedOn = !shooterSpeedOn;
             if (!shooterSpeedOn) {
                 // Reset PID state when shooter is turned off
-                targetShooterRPM = 0.0;
                 shooterIntegral = 0.0;
                 shooterLastError = 0.0;
             }
@@ -521,8 +523,21 @@ public class Tele extends OpMode {
         }
 
         // PID control for shooter RPM
-        if (shooterSpeedOn && targetShooterRPM > 0) {
-            double error = targetShooterRPM - shooterRPM;
+        // Determine effective target RPM:
+        // - If shooter is off: 0 RPM
+        // - If shooter is on but not auto-aiming at a tag: idle RPM
+        // - If shooter is on AND auto-aiming at a tag: full RPM from lookup table
+        double effectiveTargetRPM = 0.0;
+        if (shooterSpeedOn) {
+            if (autoAimEnabled && tagDetected && targetShooterRPM > 0) {
+                effectiveTargetRPM = targetShooterRPM;
+            } else {
+                effectiveTargetRPM = MIN_IDLE_SHOOTER_RPM;
+            }
+        }
+
+        if (effectiveTargetRPM > 0) {
+            double error = effectiveTargetRPM - shooterRPM;
 
             // Integrate error (with anti-windup)
             shooterIntegral += error * deltaTime;
@@ -533,7 +548,7 @@ public class Tele extends OpMode {
             shooterLastError = error;
 
             // Calculate feedforward (base power to reach target RPM)
-            double feedforward = targetShooterRPM * SHOOTER_KF;
+            double feedforward = effectiveTargetRPM * SHOOTER_KF;
 
             // Calculate PID output
             double pidOutput = (SHOOTER_KP * error) + (SHOOTER_KI * shooterIntegral) + (SHOOTER_KD * derivative);
@@ -557,24 +572,20 @@ public class Tele extends OpMode {
         boolean rpmInRange = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
 
         // Right Trigger: Auto-shoot sequence
-        // When pressed: enables shooter, waits for RPM to be in range, then executes shoot sequence
+        // Only starts if: tag detected, aimed, RPM in range, and a color is selected
         boolean rightTriggerPressed = gamepad2.right_trigger > 0.5;
         if (rightTriggerPressed && !lastGamepad2RightTriggerState) {
             if (shootSequenceActive) {
                 // If sequence is active, stop it
                 stopShootSequence();
-                shooterSpeedOn = false;
-            } else if (tagDetected) {
-                // Enable shooter and wait for RPM - sequence will start automatically when ready
-                shooterSpeedOn = true;
+            } else if (tagDetected && (colorPurpleSelected || colorGreenSelected) && autoAimEnabled && rpmInRange) {
+                // Only start if: tag detected, color selected, auto-aim enabled, and RPM is ready
+                startShootSequence();
             }
         }
         lastGamepad2RightTriggerState = rightTriggerPressed;
 
-        // Auto-start shoot sequence when shooter is on, RPM is in range, and not already shooting
-        if (shooterSpeedOn && rpmInRange && !shootSequenceActive && tagDetected) {
-            startShootSequence();
-        }
+        // No auto-start - shoot sequence only starts when right trigger is pressed with conditions met
 
         if (shootSequenceActive) {
             executeShootSequence();
@@ -604,12 +615,24 @@ public class Tele extends OpMode {
 
         telemetry.addData("--- SHOOTER ---", "");
         telemetry.addData("Shooter Enabled", shooterSpeedOn ? "ON" : "OFF");
-        telemetry.addData("Target RPM", "%.0f", targetShooterRPM);
+        telemetry.addData("Mode", (autoAimEnabled && tagDetected && targetShooterRPM > 0) ? "FULL SPEED" : (shooterSpeedOn ? "IDLE" : "OFF"));
+        telemetry.addData("Target RPM", "%.0f", (autoAimEnabled && tagDetected) ? targetShooterRPM : (shooterSpeedOn ? MIN_IDLE_SHOOTER_RPM : 0.0));
         telemetry.addData("Actual RPM", "%.0f", shooterRPM);
         telemetry.addData("Shooter Power", "%.1f%%", shooterPower * 100);
         telemetry.addData("RPM Range", "%.0f - %.0f", rpmLowerBound, rpmUpperBound);
-        telemetry.addData("RPM In Range", rpmInRange ? "YES - Press RT to shoot!" : "NO");
+        telemetry.addData("RPM In Range", rpmInRange ? "YES" : "NO");
         telemetry.addData("Hood Position", "L:%.2f R:%.2f", leftHoodPosition, rightHoodPosition);
+        // Show what's needed to shoot
+        boolean readyToShoot = tagDetected && (colorPurpleSelected || colorGreenSelected) && autoAimEnabled && rpmInRange;
+        telemetry.addData("Ready to Shoot", readyToShoot ? "YES - Press RT!" : "NO");
+        if (!readyToShoot) {
+            String missing = "";
+            if (!tagDetected) missing += "Tag ";
+            if (!autoAimEnabled) missing += "AutoAim ";
+            if (!(colorPurpleSelected || colorGreenSelected)) missing += "Color ";
+            if (!rpmInRange) missing += "RPM ";
+            telemetry.addData("Missing", missing);
+        }
 
         telemetry.addData("--- OPERATOR (Gamepad 2) ---", "");
         telemetry.addData("Left Trapdoor", leftTrapdoorOpen ? "OPEN" : "CLOSED");
