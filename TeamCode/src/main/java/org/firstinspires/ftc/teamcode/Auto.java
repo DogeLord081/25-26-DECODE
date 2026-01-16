@@ -42,7 +42,7 @@ public class Auto extends OpMode {
     private ColorSensor colorSensorRight;
 
     // Shooter constants
-    private static final double TARGET_RPM = 1800.0;
+    private static final double TARGET_RPM = 1900.0;
     private static final double RPM_TOLERANCE_PERCENT = 0.05;  // 5% tolerance
     private static final double SHOOTER_TICKS_PER_REV = 28.0;
 
@@ -69,10 +69,16 @@ public class Auto extends OpMode {
     private final Pose startPose = new Pose(57.328, 134.590, Math.toRadians(270));
     private final Pose scorePose = new Pose(52.328, 115.18032786885244, Math.toRadians(250));
     private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(325));
-
+    private final Pose joltPose = new Pose(55.328, 97.18032786885244, Math.toRadians(325));
+    private final Pose afterShootPose = new Pose(41.55750819672132, 73.73770491803278, Math.toRadians(180));
+    private final Pose intakeBallsPose = new Pose(21.55750819672132, 73.73770491803278, Math.toRadians(180));
     /* Path and PathChain declarations */
     private Path scorePreload;
     private Path afterScanPath;
+    private Path joltPath;
+    private Path afterJoltPath;
+    private Path afterShootPath;
+    private Path intakeBallsPath;
 
     /* AprilTag scanning state */
     private int detectedAprilTagId = -1;  // -1 means not yet detected
@@ -86,6 +92,19 @@ public class Auto extends OpMode {
         /* Path after scanning AprilTag */
         afterScanPath = new Path(new BezierLine(scorePose, afterScanPose));
         afterScanPath.setLinearHeadingInterpolation(scorePose.getHeading(), afterScanPose.getHeading());
+
+        joltPath = new Path(new BezierLine(afterScanPose, joltPose));
+        joltPath.setLinearHeadingInterpolation(afterScanPose.getHeading(), joltPose.getHeading());
+
+        afterJoltPath = new Path(new BezierLine(joltPose, afterScanPose));
+        afterJoltPath.setLinearHeadingInterpolation(joltPose.getHeading(), afterScanPose.getHeading());
+
+        /* Path after shooting all balls */
+        afterShootPath = new Path(new BezierLine(afterScanPose, afterShootPose));
+        afterShootPath.setLinearHeadingInterpolation(afterScanPose.getHeading(), afterShootPose.getHeading());
+
+        intakeBallsPath = new Path(new BezierLine(afterShootPose, intakeBallsPose));
+        intakeBallsPath.setLinearHeadingInterpolation(afterShootPose.getHeading(), intakeBallsPose.getHeading());
     }
 
     /** Main state machine for autonomous path progression **/
@@ -170,10 +189,26 @@ public class Auto extends OpMode {
                 executeShootingSequence();
                 break;
             case 5:
-                /* All balls shot, done */
+                /* All balls shot, go to afterShootPose */
                 shooter.setPower(0);
                 intake.setPower(0);
-                setPathState(-1);
+                follower.followPath(afterShootPath);
+                setPathState(6);
+                break;
+            case 6:
+                /* Wait for robot to reach afterShootPose */
+                if (!follower.isBusy()) {
+                    intake.setPower(-1.0);
+                    follower.followPath(intakeBallsPath);
+                    setPathState(7);
+                }
+                break;
+            case 7:
+                /* Wait for robot to reach afterShootPose */
+                if (!follower.isBusy()) {
+                    intake.setPower(0);
+                    setPathState(-1);
+                }
                 break;
         }
     }
@@ -218,59 +253,35 @@ public class Auto extends OpMode {
             return;
         }
 
-        // Only decide which side to shoot from ONCE per ball (at the start)
+        // Determine which side to shoot from based on ball order
+        // Purple (P) = left side, Green (G) = right side
+        // Third ball (index 2) = both trapdoors
         if (!shootSideDecided) {
-            // Get current target ball color (P = Purple, G = Green)
             char targetColor = ballOrder[currentBallIndex];
-
-            // Use color sensors to detect which side has the target color
-            // Purple if hue > 175, otherwise Green
-            float[] leftHSV = new float[3];
-            float[] rightHSV = new float[3];
-            Color.RGBToHSV(colorSensorLeft.red(), colorSensorLeft.green(), colorSensorLeft.blue(), leftHSV);
-            Color.RGBToHSV(colorSensorRight.red(), colorSensorRight.green(), colorSensorRight.blue(), rightHSV);
-
-            // Check proximity sensors to see if ball is present on each side
-            double leftProximity = ((DistanceSensor) colorSensorLeft).getDistance(DistanceUnit.CM);
-            double rightProximity = ((DistanceSensor) colorSensorRight).getDistance(DistanceUnit.CM);
-            boolean leftHasBall = leftProximity < 6.5;
-            boolean rightHasBall = rightProximity < 6.5;
-
-            boolean leftIsPurple = leftHSV[0] > 175;
-            boolean rightIsPurple = rightHSV[0] > 175;
-
-            // Determine which side to shoot from based on target color AND ball presence
-            currentShootLeft = false;
-            if (targetColor == 'P') {
-                // Looking for purple
-                if (leftHasBall && leftIsPurple) {
-                    currentShootLeft = true;
-                } else if (rightHasBall && rightIsPurple) {
-                    currentShootLeft = false;
-                } else if (leftHasBall) {
-                    // Fallback: if only left has ball, use left
-                    currentShootLeft = true;
-                }
+            if (currentBallIndex == 2) {
+                // Third ball - will use both trapdoors
+                currentShootLeft = true;  // Doesn't matter, we'll handle specially
             } else {
-                // Looking for green (not purple)
-                if (leftHasBall && !leftIsPurple) {
-                    currentShootLeft = true;
-                } else if (rightHasBall && !rightIsPurple) {
-                    currentShootLeft = false;
-                } else if (leftHasBall) {
-                    // Fallback: if only left has ball, use left
-                    currentShootLeft = true;
-                }
+                // First two balls - P = left, G = right
+                currentShootLeft = (targetColor == 'P');
             }
             shootSideDecided = true;
+
+            /* COMMENTED OUT - Color sorting code
+            ... existing commented out code ...
+            END COMMENTED OUT */
         }
 
-        double elapsed = shootTimer.seconds();
+        double elapsedMs = shootTimer.seconds() * 1000;  // Convert to milliseconds
+        boolean isThirdBall = (currentBallIndex == 2);
 
         // If first ball was pre-loaded, skip directly to shooting phase
+        // But wait at least 500ms after entering state 4 to let RPM stabilize
+        // For first ball, require RPM to be at or above target (not just within tolerance)
         if (currentBallIndex == 0 && firstBallPreloaded && distanceCheckPassed && !shotFired) {
-            // First ball is already in transfer, just wait for RPM and shoot
-            if (isRPMReady()) {
+            // First ball is already in transfer, wait for RPM stabilization then shoot
+            // Use stricter requirement: RPM must be >= target RPM (not just within 5%)
+            if (elapsedMs >= 500 && shooterRPM >= TARGET_RPM) {
                 // Open transfer to shoot
                 leftTransfer.setPosition(0.5);
                 rightTransfer.setPosition(0.0);
@@ -280,26 +291,46 @@ public class Auto extends OpMode {
         } else if (!shotFired && !(currentBallIndex == 0 && firstBallPreloaded)) {
             // Normal loading sequence for balls 2 and 3 (or if first ball wasn't pre-loaded)
 
-            if (elapsed < 0.5) {
-                // Open appropriate trapdoor and run intake
-                intake.setPower(-1.0);
-                if (currentShootLeft) {
+            // Open appropriate trapdoor throughout loading phase
+            if (!distanceCheckPassed) {
+                if (isThirdBall) {
+                    // Third ball - both trapdoors
+                    leftTrapdoor.setPosition(0.0);
+                    rightTrapdoor.setPosition(0.2);
+                } else if (currentShootLeft) {
                     leftTrapdoor.setPosition(0.0);
                     rightTrapdoor.setPosition(0.0);
                 } else {
                     leftTrapdoor.setPosition(0.2);
                     rightTrapdoor.setPosition(0.2);
                 }
-            } else if (elapsed < 1.5) {
-                // Keep intake running and activate kicker arm
+            }
+
+            // Intake timing: on for 0-900ms, pause 900-1400ms, on again after 1400ms
+            if (elapsedMs < 900) {
                 intake.setPower(-1.0);
-                if (currentShootLeft) {
+            } else if (elapsedMs < 1400) {
+                intake.setPower(0.0);
+            } else {
+                intake.setPower(-1.0);
+            }
+
+            // After 500ms delay, activate kicker arm(s)
+            if (elapsedMs >= 500) {
+                if (isThirdBall) {
+                    // Third ball - both kicker arms
+
+                    leftKickerArm.setPosition(0.5);
+                    rightKickerArm.setPosition(0.075);
+                } else if (currentShootLeft) {
                     leftKickerArm.setPosition(0.5);
                 } else {
                     rightKickerArm.setPosition(0.075);
                 }
-            } else if (!distanceCheckPassed) {
-                // Check distance sensor - if ball not detected, restart this ball's sequence
+            }
+
+            // At 1500ms, check distance sensor - if ball not detected, restart
+            if (elapsedMs >= 1500 && !distanceCheckPassed) {
                 double distance = distanceSensor.getDistance(DistanceUnit.CM);
                 if (distance > 20) {
                     // Ball not detected, restart the cycle for this ball
@@ -312,14 +343,16 @@ public class Auto extends OpMode {
                     leftTrapdoor.setPosition(0.1);
                     rightTrapdoor.setPosition(0.1);
                     intake.setPower(0);  // Stop intake
+                }
+            }
 
-                    // Immediately try to shoot if RPM is ready (don't wait for next loop)
-                    if (isRPMReady()) {
-                        leftTransfer.setPosition(0.5);
-                        rightTransfer.setPosition(0.0);
-                        shotFired = true;
-                        shotFiredTimer.reset();
-                    }
+            // After 2000ms and distance check passed, fire if RPM ready
+            if (elapsedMs >= 2000 && distanceCheckPassed && !shotFired) {
+                if (isRPMReady()) {
+                    leftTransfer.setPosition(0.5);
+                    rightTransfer.setPosition(0.0);
+                    shotFired = true;
+                    shotFiredTimer.reset();
                 }
             }
         }
@@ -386,70 +419,48 @@ public class Auto extends OpMode {
             return;
         }
 
-        // Only decide which side to shoot from ONCE (at the start of loading)
+        // Determine which side based on ball order - P = left, G = right
         if (!shootSideDecided) {
-            // Get current target ball color (P = Purple, G = Green)
             char targetColor = ballOrder[0];
-
-            // Use color sensors to detect which side has the target color
-            float[] leftHSV = new float[3];
-            float[] rightHSV = new float[3];
-            Color.RGBToHSV(colorSensorLeft.red(), colorSensorLeft.green(), colorSensorLeft.blue(), leftHSV);
-            Color.RGBToHSV(colorSensorRight.red(), colorSensorRight.green(), colorSensorRight.blue(), rightHSV);
-
-            // Check proximity sensors to see if ball is present on each side
-            double leftProximity = ((DistanceSensor) colorSensorLeft).getDistance(DistanceUnit.CM);
-            double rightProximity = ((DistanceSensor) colorSensorRight).getDistance(DistanceUnit.CM);
-            boolean leftHasBall = leftProximity < 6.5;
-            boolean rightHasBall = rightProximity < 6.5;
-
-            boolean leftIsPurple = leftHSV[0] > 175;
-
-            // Determine which side to shoot from
-            currentShootLeft = false;
-            if (targetColor == 'P') {
-                if (leftHasBall && leftIsPurple) {
-                    currentShootLeft = true;
-                } else if (rightHasBall && !leftIsPurple) {
-                    currentShootLeft = false;
-                } else if (leftHasBall) {
-                    currentShootLeft = true;
-                }
-            } else {
-                if (leftHasBall && !leftIsPurple) {
-                    currentShootLeft = true;
-                } else if (rightHasBall && leftIsPurple) {
-                    currentShootLeft = false;
-                } else if (leftHasBall) {
-                    currentShootLeft = true;
-                }
-            }
+            currentShootLeft = (targetColor == 'P');
             shootSideDecided = true;
+
+            /* COMMENTED OUT - Color sorting code
+            ... existing commented out code ...
+            END COMMENTED OUT */
         }
 
-        double elapsed = shootTimer.seconds();
+        double elapsedMs = shootTimer.seconds() * 1000;  // Convert to milliseconds
 
-        // Loading sequence (same as shooting but stop before firing)
-        if (elapsed < 0.5) {
-            // Open appropriate trapdoor and run intake
+        // Open appropriate trapdoor throughout loading phase
+        if (currentShootLeft) {
+            leftTrapdoor.setPosition(0.0);
+            rightTrapdoor.setPosition(0.0);
+        } else {
+            leftTrapdoor.setPosition(0.2);
+            rightTrapdoor.setPosition(0.2);
+        }
+
+        // Intake timing: on for 0-900ms, pause 900-1400ms, on again after 1400ms
+        if (elapsedMs < 900) {
             intake.setPower(-1.0);
-            if (currentShootLeft) {
-                leftTrapdoor.setPosition(0.0);
-                rightTrapdoor.setPosition(0.0);
-            } else {
-                leftTrapdoor.setPosition(0.2);
-                rightTrapdoor.setPosition(0.2);
-            }
-        } else if (elapsed < 1.5) {
-            // Keep intake running and activate kicker arm
+        } else if (elapsedMs < 1400) {
+            intake.setPower(0.0);
+        } else {
             intake.setPower(-1.0);
+        }
+
+        // After 500ms delay, activate kicker arm
+        if (elapsedMs >= 500) {
             if (currentShootLeft) {
                 leftKickerArm.setPosition(0.5);
             } else {
                 rightKickerArm.setPosition(0.075);
             }
-        } else {
-            // Check distance sensor - if ball not detected, restart
+        }
+
+        // At 1500ms, check distance sensor - if ball not detected, restart
+        if (elapsedMs >= 1500) {
             double distance = distanceSensor.getDistance(DistanceUnit.CM);
             if (distance > 20) {
                 // Ball not detected, restart the loading
