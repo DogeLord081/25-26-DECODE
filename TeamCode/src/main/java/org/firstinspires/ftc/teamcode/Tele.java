@@ -159,9 +159,11 @@ public class Tele extends OpMode {
     // Timer for shooting sequence
     private ElapsedTime shootSequenceTimer = new ElapsedTime();
     private ElapsedTime transferTimer = new ElapsedTime();
+    private ElapsedTime shotFiredTimer = new ElapsedTime();  // Timer for after shot is fired
     private boolean shootSequenceActive = false;
     private boolean autoTransferTriggered = false;  // For RPM-based auto transfer
     private boolean distanceCheckPassed = false; // Tracks if ball was detected at 3000ms
+    private boolean shotFired = false;  // Tracks if the transfer was opened (shot fired)
     private boolean kickLeft = false; // Track if left side should be kicked
     private boolean kickRight = false; // Track if right side should be kicked
     private boolean singleBallMode = false; // True if proximity > 6.5 (only one ball)
@@ -266,7 +268,7 @@ public class Tele extends OpMode {
 
         // Get joystick inputs (robot-centric driving)
         double y = gamepad1.left_stick_y;  // Forward/backward (reversed - pushing stick forward goes backward)
-        double x = gamepad1.left_stick_x;   // Left/right strafe
+        double x = -gamepad1.left_stick_x;   // Left/right strafe
         double yaw = gamepad1.right_stick_x; // Rotation
 
         // Use joystick values directly for robot-centric movement
@@ -489,17 +491,21 @@ public class Tele extends OpMode {
         }
         lastDpadRightState = gamepad2.dpad_right;
 
-        // --- Bumpers: Color Selection + Auto Shoot ---
-        // Left Bumper: Select Color: PURPLE and start auto shoot
+        // --- Bumpers: Ball Side Selection + Auto Shoot ---
+        // Left Bumper: Select ball on RIGHT side
         if (gamepad2.left_bumper && !lastGamepad2LeftBumperState) {
-            colorPurpleSelected = true;
+            kickRight = true;
+            kickLeft = false;
+            colorPurpleSelected = true;  // Set a color so shoot sequence can start
             colorGreenSelected = false;
         }
         lastGamepad2LeftBumperState = gamepad2.left_bumper;
 
-        // Right Bumper: Select Color: GREEN and start auto shoot
+        // Right Bumper: Select ball on LEFT side
         if (gamepad2.right_bumper && !lastGamepad2RightBumperState) {
-            colorGreenSelected = true;
+            kickLeft = true;
+            kickRight = false;
+            colorGreenSelected = true;  // Set a color so shoot sequence can start
             colorPurpleSelected = false;
         }
         lastGamepad2RightBumperState = gamepad2.right_bumper;
@@ -635,23 +641,28 @@ public class Tele extends OpMode {
 
         telemetry.addData("--- SHOOTER ---", "");
         telemetry.addData("Shooter Enabled", shooterSpeedOn ? "ON" : "OFF");
-        telemetry.addData("Mode", (autoAimEnabled && tagDetected && targetShooterRPM > 0) ? "FULL SPEED" : (shooterSpeedOn ? "IDLE" : "OFF"));
-        telemetry.addData("Target RPM", "%.0f", (autoAimEnabled && tagDetected) ? targetShooterRPM : (shooterSpeedOn ? MIN_IDLE_SHOOTER_RPM : 0.0));
+        telemetry.addData("Target RPM", "%.0f", targetShooterRPM);
         telemetry.addData("Actual RPM", "%.0f", shooterRPM);
         telemetry.addData("Shooter Power", "%.1f%%", shooterPower * 100);
-        telemetry.addData("RPM Range", "%.0f - %.0f", rpmLowerBound, rpmUpperBound);
-        telemetry.addData("RPM In Range", rpmInRange ? "YES" : "NO");
+        telemetry.addData("RPM Range (5%%)", "%.0f - %.0f", rpmLowerBound, rpmUpperBound);
+        telemetry.addData("RPM In Range", rpmInRange ? "YES - READY TO FIRE!" : "NO - WAITING...");
         telemetry.addData("Hood Position", "L:%.2f R:%.2f", leftHoodPosition, rightHoodPosition);
+
+        // Shoot sequence status
+        if (shootSequenceActive) {
+            telemetry.addData("--- SHOOT SEQUENCE ---", "ACTIVE");
+            telemetry.addData("Sequence Time", "%.1f sec", shootSequenceTimer.seconds());
+            telemetry.addData("Distance Check", distanceCheckPassed ? "PASSED" : "WAITING...");
+            telemetry.addData("Shot Fired", shotFired ? "YES" : "NO");
+        }
+
         // Show what's needed to shoot
         boolean readyToShoot = (colorPurpleSelected || colorGreenSelected);
         String shootMode = (tagDetected && autoAimEnabled) ? "TAG MODE" : "FALLBACK MODE";
-        telemetry.addData("Ready to Shoot", readyToShoot ? ("YES - " + shootMode + " - Press RT!") : "NO - Select Color");
+        telemetry.addData("Ready to Shoot", readyToShoot ? ("YES - " + shootMode + " - Press RT!") : "NO - Select Side");
         if (!readyToShoot) {
             String missing = "";
-            if (!tagDetected) missing += "Tag ";
-            if (!autoAimEnabled) missing += "AutoAim ";
-            if (!(colorPurpleSelected || colorGreenSelected)) missing += "Color ";
-            if (!rpmInRange) missing += "RPM ";
+            if (!(colorPurpleSelected || colorGreenSelected)) missing += "Side(LB/RB) ";
             telemetry.addData("Missing", missing);
         }
 
@@ -662,7 +673,7 @@ public class Tele extends OpMode {
         telemetry.addData("Transfers", transfersOpen ? "OPEN" : "CLOSED");
         telemetry.addData("Left Kicker Arm", leftKickerArmOpen ? "OPEN" : "CLOSED");
         telemetry.addData("Right Kicker Arm", rightKickerArmOpen ? "OPEN" : "CLOSED");
-        telemetry.addData("Color Selected", colorPurpleSelected ? "PURPLE" : (colorGreenSelected ? "GREEN" : "NONE"));
+        telemetry.addData("Ball Side Selected", kickLeft ? "LEFT" : (kickRight ? "RIGHT" : "NONE"));
 
         // Distance Sensor Telemetry
         telemetry.addData("Distance (cm)", "%.2f", distanceSensor.getDistance(DistanceUnit.CM));
@@ -691,8 +702,15 @@ public class Tele extends OpMode {
     private void startShootSequence() {
         shootSequenceActive = true;
         shootSequenceTimer.reset();
-        manualBothTrapdoorsOverride = false; // Reset manual override flag
+        shotFired = false;
 
+        // If both trapdoors were manually opened before starting, set the override flag
+        manualBothTrapdoorsOverride = bothTrapdoorsOpen;
+
+        // Enable shooter so PID control will run the motor to target RPM
+        shooterSpeedOn = true;
+
+        /* COMMENTED OUT - Color sorting code
         // Color detection logic
         float[] leftHSV = new float[3];
         float[] rightHSV = new float[3];
@@ -746,25 +764,33 @@ public class Tele extends OpMode {
             kickLeft = openLeft;
             kickRight = openRight;
         }
+        END COMMENTED OUT */
+
+        // Ball side is now selected directly via bumpers (kickLeft/kickRight already set)
+        singleBallMode = false;
+        trapdoorsOpenedForSingleBall = false;
 
         if (singleBallMode) {
             // Single ball mode: stop intake, open only left trapdoor
             intake.setPower(0.0);
             leftTrapdoor.setPosition(0.0);
             rightTrapdoor.setPosition(0.0);  // Keep right closed (matches X button left trapdoor logic)
+        } else if (manualBothTrapdoorsOverride) {
+            // Both trapdoors were manually opened - keep them both open
+            leftTrapdoor.setPosition(0.0);
+            rightTrapdoor.setPosition(0.2);
         } else {
-            // Normal mode: Only open ONE trapdoor based on color detection (never both automatically)
-            // If both match, prioritize left
-            if (openLeft) {
+            // Normal mode: Only open ONE trapdoor based on ball side selection (never both automatically)
+            if (kickLeft) {
                 // Left Trapdoor Open logic (matches X button)
                 leftTrapdoor.setPosition(0.0);
                 rightTrapdoor.setPosition(0.0);
-            } else if (openRight) {
+            } else if (kickRight) {
                 // Right Trapdoor Open logic (matches B button)
                 rightTrapdoor.setPosition(0.2);
                 leftTrapdoor.setPosition(0.2);
             } else {
-                // No match, ensure closed
+                // No selection, ensure closed
                 leftTrapdoor.setPosition(0.2);
                 rightTrapdoor.setPosition(0.0);
             }
@@ -776,8 +802,14 @@ public class Tele extends OpMode {
     }
 
     private void executeShootSequence() {
-        // Keep shooter running throughout the sequence
-        shooter.setPower(0.5);
+        // Use PID-controlled shooter power (calculated in main loop)
+        // The main loop's PID already handles targetShooterRPM from the LUT
+        // We just need to make sure shooterSpeedOn is enabled during the sequence
+
+        // Check if RPM is within 5% tolerance of target
+        double rpmLowerBound = targetShooterRPM * (1.0 - RPM_TOLERANCE_PERCENT);
+        double rpmUpperBound = targetShooterRPM * (1.0 + RPM_TOLERANCE_PERCENT);
+        boolean rpmReady = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
 
         if (singleBallMode) {
             // Single ball mode: intake stopped at start, resume after 300ms
@@ -816,28 +848,33 @@ public class Tele extends OpMode {
         }
 
         // At 3000ms, check distance sensor - if > 20cm, ball not in transfer, restart cycle
-        if (shootSequenceTimer.milliseconds() >= 3000 && !distanceCheckPassed) {
+        if (shootSequenceTimer.milliseconds() >= 1500 && !distanceCheckPassed) {
             double distance = distanceSensor.getDistance(DistanceUnit.CM);
             if (distance > 20) {
                 // Ball not detected, restart the cycle
                 restartShootSequence();
                 return;
             } else {
-                // Ball detected, proceed with transfers and close both trapdoors
+                // Ball detected, proceed with transfers
                 distanceCheckPassed = true;
-                leftTrapdoor.setPosition(0.1);
-                rightTrapdoor.setPosition(0.1);
+                // Only close trapdoors if manual override is not set
+                if (!manualBothTrapdoorsOverride) {
+                    leftTrapdoor.setPosition(0.1);
+                    rightTrapdoor.setPosition(0.1);
+                }
             }
         }
 
-        // After 3500ms, set the transfers (only if distance check passed)
-        if (shootSequenceTimer.milliseconds() >= 3500 && distanceCheckPassed) {
+        // After 2000ms and distance check passed, set the transfers ONLY if RPM is ready
+        if (shootSequenceTimer.milliseconds() >= 2000 && distanceCheckPassed && rpmReady && !shotFired) {
             rightTransfer.setPosition(0.0);
             leftTransfer.setPosition(0.5);
+            shotFired = true;
+            shotFiredTimer.reset();  // Start timer for sequence end
         }
 
-        // End the sequence and reset positions (e.g., after 4000ms)
-        if (shootSequenceTimer.milliseconds() >= 4500) {
+        // End the sequence 1 second after the shot was fired
+        if (shotFired && shotFiredTimer.milliseconds() >= 1000) {
             rightTrapdoor.setPosition(0.1);
             leftTrapdoor.setPosition(0.1);
             leftKickerArm.setPosition(0.0);
@@ -847,6 +884,7 @@ public class Tele extends OpMode {
 
             // Turn off shooter and intake at end of sequence
             shooter.setPower(0.0);
+            shooterSpeedOn = false;  // Turn off shooter speed toggle
 
             // Reset state variables to match physical state
             leftTrapdoorOpen = false;
@@ -858,6 +896,7 @@ public class Tele extends OpMode {
 
             shootSequenceActive = false;
             distanceCheckPassed = false;
+            shotFired = false;
             kickLeft = false;
             kickRight = false;
             singleBallMode = false;
@@ -870,6 +909,7 @@ public class Tele extends OpMode {
         // Stop the sequence and reset all mechanisms
         shootSequenceActive = false;
         distanceCheckPassed = false;
+        shotFired = false;
         kickLeft = false;
         kickRight = false;
         singleBallMode = false;
@@ -886,6 +926,7 @@ public class Tele extends OpMode {
 
         // Stop motors
         shooter.setPower(0.0);
+        shooterSpeedOn = false;  // Turn off shooter speed toggle
         intake.setPower(0.0);
 
         // Reset state variables to match physical state
@@ -901,6 +942,7 @@ public class Tele extends OpMode {
         // Reset the timer to restart the cycle from the beginning
         shootSequenceTimer.reset();
         distanceCheckPassed = false;
+        shotFired = false;
 
         // Do NOT re-read color sensors - keep using the same kickLeft/kickRight values
         // that were originally determined until the ball passes the distance sensor check
