@@ -61,6 +61,9 @@ public class Auto extends OpMode {
     private boolean currentShootLeft = false;  // Cached value for which side to shoot from
     private boolean shootSideDecided = false;  // Track if we've decided which side to shoot from
 
+    // *** NEW VARIABLE FOR JOLT LOGIC ***
+    private boolean thirdBallJoltDone = false;
+
     // Ball order based on AprilTag (P = Purple/Left, G = Green/Right)
     // ID 1: PPG, ID 2: PGP, ID 3: GPP
     private char[] ballOrder = new char[3];
@@ -71,12 +74,13 @@ public class Auto extends OpMode {
     private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(325));
     private final Pose joltPose = new Pose(55.328, 97.18032786885244, Math.toRadians(325));
     private final Pose afterShootPose = new Pose(41.55750819672132, 73.73770491803278, Math.toRadians(180));
-    private final Pose intakeBallsPose = new Pose(21.55750819672132, 73.73770491803278, Math.toRadians(180));
+    private final Pose intakeBallsPose = new Pose(18.55750819672132, 73.73770491803278, Math.toRadians(180));
+
     /* Path and PathChain declarations */
     private Path scorePreload;
     private Path afterScanPath;
     private Path joltPath;
-    private Path afterJoltPath;
+    private Path afterjoltPath;
     private Path afterShootPath;
     private Path intakeBallsPath;
 
@@ -96,8 +100,8 @@ public class Auto extends OpMode {
         joltPath = new Path(new BezierLine(afterScanPose, joltPose));
         joltPath.setLinearHeadingInterpolation(afterScanPose.getHeading(), joltPose.getHeading());
 
-        afterJoltPath = new Path(new BezierLine(joltPose, afterScanPose));
-        afterJoltPath.setLinearHeadingInterpolation(joltPose.getHeading(), afterScanPose.getHeading());
+        afterjoltPath = new Path(new BezierLine(joltPose, afterScanPose));
+        afterjoltPath.setLinearHeadingInterpolation(joltPose.getHeading(), afterScanPose.getHeading());
 
         /* Path after shooting all balls */
         afterShootPath = new Path(new BezierLine(afterScanPose, afterShootPose));
@@ -136,8 +140,6 @@ public class Auto extends OpMode {
                     detectedAprilTagId = blocks[0].id;
 
                     /* Set ball order based on AprilTag ID */
-                    // ID 1: PPG, ID 2: PGP, ID 3: GPP
-                    // P = Purple (left side), G = Green (right side)
                     switch (detectedAprilTagId) {
                         case 1:
                             ballOrder = new char[]{'P', 'P', 'G'};
@@ -161,6 +163,7 @@ public class Auto extends OpMode {
                     shootTimer.reset();
                     shotFired = false;
                     distanceCheckPassed = false;
+                    thirdBallJoltDone = false; // Reset jolt flag
 
                     setPathState(3);
                 }
@@ -186,8 +189,50 @@ public class Auto extends OpMode {
             case 4:
                 /* Shooting state - shoot balls in order */
                 controlShooterPID();  // Keep controlling shooter
-                executeShootingSequence();
+
+                // *** JOLT LOGIC INSERTION ***
+                // If we are on the 3rd ball (index 2) and haven't jolted yet
+                if (currentBallIndex == 2 && !thirdBallJoltDone) {
+                    // Open both trapdoors immediately (standard for 3rd ball)
+                    leftTrapdoor.setPosition(0.0);
+                    rightTrapdoor.setPosition(0.2);
+
+                    // Interrupt sequence to perform jolt
+                    follower.followPath(joltPath);
+                    setPathState(41); // Move to Jolt Out state
+                } else {
+                    // Normal execution
+                    executeShootingSequence();
+                }
                 break;
+
+            case 41:
+                /* JOLT OUT: Wait for robot to move back */
+                controlShooterPID();
+                if(!follower.isBusy()) {
+                    follower.followPath(afterjoltPath);
+                    setPathState(42); // Move to Jolt Return state
+                }
+                break;
+
+            case 42:
+                /* JOLT RETURN: Wait for robot to come back */
+                controlShooterPID();
+                if(!follower.isBusy()) {
+                    // Re-engage hold point to keep steady for shooting
+                    follower.holdPoint(afterScanPose);
+
+                    // Reset the shoot timer so the intake/kicker sequence restarts fresh
+                    shootTimer.reset();
+
+                    // Mark jolt as complete so we don't loop back here
+                    thirdBallJoltDone = true;
+
+                    // Return to standard shooting logic
+                    setPathState(4);
+                }
+                break;
+
             case 5:
                 /* All balls shot, go to afterShootPose */
                 shooter.setPower(0);
@@ -254,8 +299,6 @@ public class Auto extends OpMode {
         }
 
         // Determine which side to shoot from based on ball order
-        // Purple (P) = left side, Green (G) = right side
-        // Third ball (index 2) = both trapdoors
         if (!shootSideDecided) {
             char targetColor = ballOrder[currentBallIndex];
             if (currentBallIndex == 2) {
@@ -266,21 +309,14 @@ public class Auto extends OpMode {
                 currentShootLeft = (targetColor == 'P');
             }
             shootSideDecided = true;
-
-            /* COMMENTED OUT - Color sorting code
-            ... existing commented out code ...
-            END COMMENTED OUT */
         }
 
         double elapsedMs = shootTimer.seconds() * 1000;  // Convert to milliseconds
         boolean isThirdBall = (currentBallIndex == 2);
 
         // If first ball was pre-loaded, skip directly to shooting phase
-        // But wait at least 500ms after entering state 4 to let RPM stabilize
-        // For first ball, require RPM to be at or above target (not just within tolerance)
         if (currentBallIndex == 0 && firstBallPreloaded && distanceCheckPassed && !shotFired) {
             // First ball is already in transfer, wait for RPM stabilization then shoot
-            // Use stricter requirement: RPM must be >= target RPM (not just within 5%)
             if (elapsedMs >= 500 && shooterRPM >= TARGET_RPM) {
                 // Open transfer to shoot
                 leftTransfer.setPosition(0.5);
@@ -319,7 +355,6 @@ public class Auto extends OpMode {
             if (elapsedMs >= 500) {
                 if (isThirdBall) {
                     // Third ball - both kicker arms
-
                     leftKickerArm.setPosition(0.5);
                     rightKickerArm.setPosition(0.075);
                 } else if (currentShootLeft) {
@@ -383,6 +418,7 @@ public class Auto extends OpMode {
             distanceCheckPassed = false;
             firstBallPreloaded = false;  // Clear the preload flag
             shootSideDecided = false;  // Reset so we decide side for next ball
+            thirdBallJoltDone = false; // Reset jolt logic for safety (though not needed if idx > 2)
             shootTimer.reset();
         }
     }
@@ -424,10 +460,6 @@ public class Auto extends OpMode {
             char targetColor = ballOrder[0];
             currentShootLeft = (targetColor == 'P');
             shootSideDecided = true;
-
-            /* COMMENTED OUT - Color sorting code
-            ... existing commented out code ...
-            END COMMENTED OUT */
         }
 
         double elapsedMs = shootTimer.seconds() * 1000;  // Convert to milliseconds
@@ -516,10 +548,11 @@ public class Auto extends OpMode {
         telemetry.addData("RPM Ready", isRPMReady() ? "YES" : "NO");
 
         // Shooting sequence status
-        if (pathState == 4) {
+        if (pathState == 4 || pathState == 41 || pathState == 42) {
             telemetry.addData("--- SHOOTING ---", "");
             telemetry.addData("Current Ball", currentBallIndex + 1);
             telemetry.addData("Target Color", currentBallIndex < 3 ? (ballOrder[currentBallIndex] == 'P' ? "PURPLE" : "GREEN") : "Done");
+            telemetry.addData("Jolting", (pathState == 41 || pathState == 42) ? "YES" : "NO");
 
             // Show color sensor readings
             float[] leftHSV = new float[3];
@@ -532,16 +565,16 @@ public class Auto extends OpMode {
             double rightProximity = ((DistanceSensor) colorSensorRight).getDistance(DistanceUnit.CM);
 
             telemetry.addData("Left Sensor", (leftHSV[0] > 175 ? "PURPLE" : "GREEN") +
-                " (prox: " + String.format("%.1f", leftProximity) + "cm" +
-                (leftProximity < 6.5 ? " BALL" : "") + ")");
+                    " (prox: " + String.format("%.1f", leftProximity) + "cm" +
+                    (leftProximity < 6.5 ? " BALL" : "") + ")");
             telemetry.addData("Right Sensor", (rightHSV[0] > 175 ? "PURPLE" : "GREEN") +
-                " (prox: " + String.format("%.1f", rightProximity) + "cm" +
-                (rightProximity < 6.5 ? " BALL" : "") + ")");
+                    " (prox: " + String.format("%.1f", rightProximity) + "cm" +
+                    (rightProximity < 6.5 ? " BALL" : "") + ")");
 
             // Show transfer distance sensor
             double transferDistance = distanceSensor.getDistance(DistanceUnit.CM);
             telemetry.addData("Transfer Distance", String.format("%.1f", transferDistance) + "cm" +
-                (transferDistance < 20 ? " BALL DETECTED" : " NO BALL - WILL RETRY"));
+                    (transferDistance < 20 ? " BALL DETECTED" : " NO BALL - WILL RETRY"));
 
             telemetry.addData("Distance Check", distanceCheckPassed ? "PASSED" : "WAITING");
             telemetry.addData("Shot Fired", shotFired ? "YES" : "NO");
