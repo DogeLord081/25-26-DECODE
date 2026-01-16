@@ -251,6 +251,10 @@ public class Tele extends OpMode {
         leftHoodAdjustment.setPosition(leftHoodPosition);
         rightHoodAdjustment.setPosition(rightHoodPosition);
 
+        // Initialize trapdoors to closed position
+        leftTrapdoor.setPosition(0.1);
+        rightTrapdoor.setPosition(0.1);
+
         leftLift.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         rightLift.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
     }
@@ -672,6 +676,8 @@ public class Tele extends OpMode {
                 leftHSV[0], leftHSV[1], leftHSV[2], ((DistanceSensor) colorSensorLeft).getDistance(DistanceUnit.CM));
         telemetry.addData("Right Color Sensor (H,S,V,D)", "(%.1f, %.2f, %.2f, %.3f)",
                 rightHSV[0], rightHSV[1], rightHSV[2], ((DistanceSensor) colorSensorRight).getDistance(DistanceUnit.CM));
+        telemetry.addData("Left Detected Color", leftHSV[0] > 175 ? "PURPLE" : "GREEN");
+        telemetry.addData("Right Detected Color", rightHSV[0] > 175 ? "PURPLE" : "GREEN");
 
         telemetry.update();
     }
@@ -718,10 +724,24 @@ public class Tele extends OpMode {
         }
 
         // Track which kicker arms should activate (only used if not single ball mode)
-        // If both balls are the same color, prioritize left
+        // If both balls are the same color, use proximity to determine which side:
+        // - If left proximity < 4 and right > 4, use left
+        // - If right proximity < 4 and left > 4, use right
+        // - Otherwise (both < 4 or both > 4), prioritize left
         if (openLeft && openRight) {
-            kickLeft = true;
-            kickRight = false;
+            boolean leftClose = leftProximity < 5;
+            boolean rightClose = rightProximity < 5;
+            if (leftClose && !rightClose) {
+                kickLeft = true;
+                kickRight = false;
+            } else if (rightClose && !leftClose) {
+                kickLeft = false;
+                kickRight = true;
+            } else {
+                // Both close or both far - prioritize left
+                kickLeft = true;
+                kickRight = false;
+            }
         } else {
             kickLeft = openLeft;
             kickRight = openRight;
@@ -803,8 +823,10 @@ public class Tele extends OpMode {
                 restartShootSequence();
                 return;
             } else {
-                // Ball detected, proceed with transfers
+                // Ball detected, proceed with transfers and close both trapdoors
                 distanceCheckPassed = true;
+                leftTrapdoor.setPosition(0.1);
+                rightTrapdoor.setPosition(0.1);
             }
         }
 
