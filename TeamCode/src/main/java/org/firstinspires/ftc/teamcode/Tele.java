@@ -14,7 +14,6 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import com.qualcomm.robotcore.hardware.DistanceSensor;
 import com.qualcomm.hardware.dfrobot.HuskyLens;
-import android.graphics.Color;
 
 
 @com.qualcomm.robotcore.eventloop.opmode.TeleOp (name = "Tele")
@@ -59,9 +58,9 @@ public class Tele extends OpMode {
     // Auto-aim target position - dynamically calculated based on approach angle
     // Angle lookup: {angle (degrees), target X percent from left}
     private static final double[][] ANGLE_TO_TARGET_LOOKUP = {
-        {45, 0.90},   // 45 degrees to the left → tag at 90% from left
-        {90, 0.75},   // Head on (90 degrees) → tag at 75% from left
-        {135, 0.60}   // 45 degrees to the right → tag at 60% from left
+            {45, 0.90},   // 45 degrees to the left → tag at 90% from left
+            {90, 0.75},   // Head on (90 degrees) → tag at 75% from left
+            {135, 0.60}   // 45 degrees to the right → tag at 60% from left
     };
     private static final double AIM_TOLERANCE_PIXELS = 15.0;
     private static final double AIM_KP = 0.003;
@@ -69,17 +68,17 @@ public class Tele extends OpMode {
     // ========== SHOOTER LOOKUP TABLE & PID CONSTANTS ==========
     private static final double MAX_SHOOTER_RPM = 4900.0;
     private static final double[][] SHOOTER_LOOKUP_TABLE = {
-        {18, 0.05, 1800},
-        {24, 0.05, 1800},
-        {30, 0.05, 1800},
-        {36, 0.30, 1800},
-        {42, 0.30, 1800},
-        {48, 0.20, 1850},
-        {54, 0.30, 1850},
-        {60, 0.30, 1900},
-        {66, 0.30, 2000},
-        {72, 0.30, 2050},
-        {118, 0.30, 2250}
+            {18, 0.05, 1800},
+            {24, 0.05, 1800},
+            {30, 0.05, 1800},
+            {36, 0.30, 1800},
+            {42, 0.30, 1800},
+            {48, 0.20, 1850},
+            {54, 0.30, 1850},
+            {60, 0.30, 1900},
+            {66, 0.30, 2000},
+            {72, 0.30, 2050},
+            {118, 0.30, 2250}
     };
 
     // Shooter PID constants
@@ -104,7 +103,6 @@ public class Tele extends OpMode {
     private int detectedTagX = -1;
     private boolean tagDetected = false;
     private double autoAimRotation = 0.0;
-    private double lockedShooterRPM = 0.0;
     private boolean isAimed = false;
     private double approachAngle = 90.0;
     private int targetXPixels = HUSKYLENS_WIDTH / 2;
@@ -525,27 +523,27 @@ public class Tele extends OpMode {
         }
         lastGamepad2LeftTriggerState = leftTriggerPressed;
 
-// ========== SHOOTER RPM TRACKING AND PID CONTROL ==========
+        // ========== SHOOTER RPM TRACKING AND PID CONTROL ==========
         // Calculate shooter RPM from encoder
         int currentShooterPosition = shooter.getCurrentPosition();
         double deltaTime = velocityTimer.seconds();
 
-        if (deltaTime > 0.02) {
+        if (deltaTime > 0.02) {  // Update velocity every 20ms
             int deltaTicks = currentShooterPosition - lastShooterEncoderPosition;
             double ticksPerSecond = Math.abs(deltaTicks / deltaTime);
+            // Convert ticks/second to RPM: (ticks/sec) / (ticks/rev) * 60 = RPM
             shooterRPM = (ticksPerSecond / SHOOTER_TICKS_PER_REV) * 60.0;
             lastShooterEncoderPosition = currentShooterPosition;
             velocityTimer.reset();
         }
 
         // PID control for shooter RPM
+        // Determine effective target RPM:
+        // - If shooter is off: 0 RPM
+        // - If shooter is on but not auto-aiming at a tag: idle RPM
+        // - If shooter is on AND auto-aiming at a tag: full RPM from lookup table
         double effectiveTargetRPM = 0.0;
-
-        // LOGIC CHANGE:
-        // If a sequence is active, we MUST use the locked RPM, otherwise use the live target
-        if (shootSequenceActive) {
-            effectiveTargetRPM = lockedShooterRPM;
-        } else if (shooterSpeedOn) {
+        if (shooterSpeedOn) {
             if (autoAimEnabled && tagDetected && targetShooterRPM > 0) {
                 effectiveTargetRPM = targetShooterRPM;
             } else {
@@ -556,23 +554,31 @@ public class Tele extends OpMode {
         if (effectiveTargetRPM > 0) {
             double error = effectiveTargetRPM - shooterRPM;
 
+            // Integrate error (with anti-windup)
             shooterIntegral += error * deltaTime;
             shooterIntegral = Range.clip(shooterIntegral, -5000, 5000);
 
+            // Calculate derivative
             double derivative = (error - shooterLastError) / deltaTime;
             shooterLastError = error;
 
+            // Calculate feedforward (base power to reach target RPM)
             double feedforward = effectiveTargetRPM * SHOOTER_KF;
+
+            // Calculate PID output
             double pidOutput = (SHOOTER_KP * error) + (SHOOTER_KI * shooterIntegral) + (SHOOTER_KD * derivative);
 
+            // Combine feedforward and PID
             shooterPower = feedforward + pidOutput;
             shooterPower = Range.clip(shooterPower, 0.0, 1.0);
         } else {
+            // Reset PID state when shooter is off
             shooterPower = 0.0;
             shooterIntegral = 0.0;
             shooterLastError = 0.0;
         }
 
+        // Set shooter power
         shooter.setPower(shooterPower);
 
         // Check if RPM is within tolerance for auto transfer

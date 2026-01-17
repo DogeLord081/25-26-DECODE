@@ -74,7 +74,7 @@ public class Auto extends OpMode {
     private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(325));
     private final Pose joltPose = new Pose(55.328, 97.18032786885244, Math.toRadians(325));
     private final Pose afterShootPose = new Pose(41.55750819672132, 73.73770491803278, Math.toRadians(180));
-    private final Pose intakeBallsPose = new Pose(6.55750819672132, 73.73770491803278, Math.toRadians(180));
+    private final Pose intakeBallsPose = new Pose(8.55750819672132, 73.73770491803278, Math.toRadians(180));
 
     /* Path and PathChain declarations */
     private Path scorePreload;
@@ -130,7 +130,7 @@ public class Auto extends OpMode {
         // *** EMERGENCY PARK LOGIC ***
         // If we have crossed 27 seconds and aren't already parking, abort and move to park
         // We check pathState != 99 and != 100 to ensure we don't re-trigger this once started
-        if (opmodeTimer.getElapsedTimeSeconds() > 29 && pathState != 99 && pathState != 100) {
+        if (opmodeTimer.getElapsedTimeSeconds() > 28.8 && pathState != 99 && pathState != 100) {
             // Shut down mechanisms
             shooter.setPower(0);
             intake.setPower(0);
