@@ -76,8 +76,8 @@ public class AutoRed extends OpMode {
     /* Define poses for the autonomous routine */
     private final Pose startPose = new Pose(21.63157142857142, 129.60802107728338, Math.toRadians(322)).mirror();
     private final Pose scorePose = new Pose(47.328, 115.18032786885244, Math.toRadians(250)).mirror();
-    private final Pose afterScanPose = new Pose(47.328, 105.18032786885244, Math.toRadians(323)).mirror();
-    private final Pose joltPose = new Pose(50.328, 102.18032786885244, Math.toRadians(323)).mirror();
+    private final Pose afterScanPose = new Pose(47.328, 105.18032786885244, Math.toRadians(325)).mirror();
+    private final Pose joltPose = new Pose(50.328, 102.18032786885244, Math.toRadians(325)).mirror();
     private final Pose afterShootPose = new Pose(44.55750819672132, 54, Math.toRadians(180)).mirror();
     private final Pose intakeBallsPose = new Pose(15, 51, Math.toRadians(180)).mirror();
 
