@@ -127,6 +127,26 @@ public class Auto extends OpMode {
         // Update shooter RPM tracking
         updateShooterRPM();
 
+        // *** EMERGENCY PARK LOGIC ***
+        // If we have crossed 27 seconds and aren't already parking, abort and move to park
+        // We check pathState != 99 and != 100 to ensure we don't re-trigger this once started
+        if (opmodeTimer.getElapsedTimeSeconds() > 29 && pathState != 99 && pathState != 100) {
+            // Shut down mechanisms
+            shooter.setPower(0);
+            intake.setPower(0);
+
+            // Create a dynamic path from WHEREVER we are right now to the parking spot
+            // This ensures we don't try to jump to the start of a pre-recorded path
+            Pose currentPose = follower.getPose();
+            Path emergencyParkPath = new Path(new BezierLine(currentPose, afterShootPose));
+            emergencyParkPath.setLinearHeadingInterpolation(currentPose.getHeading(), afterShootPose.getHeading());
+
+            // Follow it immediately
+            follower.followPath(emergencyParkPath);
+            setPathState(99);
+            return; // Exit the function so we don't execute other cases below
+        }
+
         switch (pathState) {
             case 0:
                 // Start shooter spinning to target RPM
@@ -330,6 +350,17 @@ public class Auto extends OpMode {
                 intake.setPower(0);
                 setPathState(-1);
                 break;
+
+            // *** EMERGENCY PARK STATE ***
+            case 99:
+                // Waiting for the robot to reach parking spot
+                if(!follower.isBusy()) {
+                    setPathState(100);
+                }
+                break;
+            case 100:
+                // Robot parked, do nothing
+                break;
         }
     }
 
@@ -411,7 +442,7 @@ public class Auto extends OpMode {
 
         // Pre-load logic only applies to Round 1 (useSensors == false)
         if (!useSensors && currentBallIndex == 0 && firstBallPreloaded && distanceCheckPassed && !shotFired) {
-            if (elapsedMs >= 500 && shooterRPM >= TARGET_RPM + 50) {
+            if (elapsedMs >= 500 && shooterRPM >= TARGET_RPM) {
                 leftTransfer.setPosition(0.5);
                 rightTransfer.setPosition(0.0);
                 shotFired = true;
@@ -598,6 +629,7 @@ public class Auto extends OpMode {
         telemetry.addData("X", follower.getPose().getX());
         telemetry.addData("Y", follower.getPose().getY());
         telemetry.addData("Heading", Math.toDegrees(follower.getPose().getHeading()));
+        telemetry.addData("Time Remaining", String.format("%.1f s", 30.0 - opmodeTimer.getElapsedTimeSeconds()));
 
         // HuskyLens AprilTag detection
         HuskyLens.Block[] blocks = huskyLens.blocks();
@@ -652,6 +684,8 @@ public class Auto extends OpMode {
             telemetry.addData("Distance Check", distanceCheckPassed ? "PASSED" : "WAITING");
             telemetry.addData("Shot Fired", shotFired ? "YES" : "NO");
             telemetry.addData("Shoot Timer", String.format("%.2f", shootTimer.seconds()) + "s");
+        } else if (pathState == 99 || pathState == 100) {
+            telemetry.addData("--- EMERGENCY PARK ---", "MOVING TO PARK");
         }
 
         telemetry.update();
