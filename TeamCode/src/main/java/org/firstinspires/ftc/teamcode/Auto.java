@@ -253,7 +253,6 @@ public class Auto extends OpMode {
                     setPathState(4);
                 }
                 break;
-
             case 5:
                 /* All balls shot, go to afterShootPose */
                 shooter.setPower(0);
@@ -275,14 +274,28 @@ public class Auto extends OpMode {
                     intake.setPower(0);
                     // Start return trip
                     follower.followPath(returnToAfterShootPath);
+
+                    // Prepare to preload first ball during the return trip
+                    // Reset timers/flags so executeFirstBallLoading() can run while moving
+                    shootTimer.reset();
+                    shotFired = false;
+                    distanceCheckPassed = false;
+                    shootSideDecided = false;
+                    currentBallIndex = 0; // We'll be preloading ball index 0
+
                     setPathState(8);
                 }
                 break;
 
-            // *** NEW RETURN AND SECOND SHOOTING LOGIC ***
-
             case 8:
                 /* Arrived at afterShootPose, go to Scan Pose */
+                controlShooterPID();
+                // While we're still traveling back to the scan/shoot pose, try to preload the first ball
+                if (follower.isBusy()) {
+                    // Preload the first ball in parallel with motion
+                    executeFirstBallLoading();
+                }
+
                 if(!follower.isBusy()){
 
                     shooter.setPower(0.5); // Spin up shooter again
@@ -294,17 +307,31 @@ public class Auto extends OpMode {
             case 9:
                 /* Arrived back at Shooting Position */
                 controlShooterPID();
+
+                // While traveling the final leg to the shooting point, continue preloading
+                if (follower.isBusy()) {
+                    executeFirstBallLoading();
+                }
+
                 if(!follower.isBusy()){
                     follower.holdPoint(afterScanPose);
+
+                    // Preserve whether the first ball actually got loaded during the return trip
+                    boolean preloaded = distanceCheckPassed;
 
                     // Reset variables for Round 2
                     currentBallIndex = 0;
                     shotFired = false;
-                    distanceCheckPassed = false;
+                    // Preserve distanceCheckPassed so Round 2 can immediately use the preloaded ball
+                    // (Don't clear here; we'll apply the preserved `preloaded` value below)
                     thirdBallJoltDone = false;
                     shootSideDecided = false;
-                    firstBallPreloaded = false; // Not relevant for round 2
+                    // DO NOT force-clear firstBallPreloaded here — use the preserved value
                     shootTimer.reset();
+
+                    // Apply preserved preloaded state so Round 2 knows the ball is already in-transfer
+                    firstBallPreloaded = preloaded;
+                    distanceCheckPassed = preloaded;
 
                     setPathState(10);
                 }
@@ -444,6 +471,17 @@ public class Auto extends OpMode {
 
         double elapsedMs = shootTimer.seconds() * 1000;  // Convert to milliseconds
         boolean isThirdBall = (currentBallIndex == 2);
+
+        // QUICK-FIRE: If Round 2 and we already preloaded the first ball during the return trip,
+        // allow an expedited fire without going through the full loading timing.
+        if (useSensors && currentBallIndex == 0 && firstBallPreloaded && distanceCheckPassed && !shotFired) {
+            if (elapsedMs >= 500 && isRPMReady()) {
+                leftTransfer.setPosition(0.5);
+                rightTransfer.setPosition(0.0);
+                shotFired = true;
+                shotFiredTimer.reset();
+            }
+        }
 
         // Pre-load logic only applies to Round 1 (useSensors == false)
         if (!useSensors && currentBallIndex == 0 && firstBallPreloaded && distanceCheckPassed && !shotFired) {
