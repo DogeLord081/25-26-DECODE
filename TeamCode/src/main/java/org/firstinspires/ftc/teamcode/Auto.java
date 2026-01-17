@@ -76,8 +76,8 @@ public class Auto extends OpMode {
     /* Define poses for the autonomous routine */
     private final Pose startPose = new Pose(26.63157142857142, 129.60802107728338, Math.toRadians(325));
     private final Pose scorePose = new Pose(52.328, 115.18032786885244, Math.toRadians(250));
-    private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(325));
-    private final Pose joltPose = new Pose(55.328, 97.18032786885244, Math.toRadians(325));
+    private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(328));
+    private final Pose joltPose = new Pose(55.328, 97.18032786885244, Math.toRadians(328));
     private final Pose afterShootPose = new Pose(41.55750819672132, 73.73770491803278, Math.toRadians(180));
     private final Pose intakeBallsPose = new Pose(8.55750819672132, 73.73770491803278, Math.toRadians(180));
 
