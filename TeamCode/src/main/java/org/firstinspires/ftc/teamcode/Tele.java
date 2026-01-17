@@ -396,10 +396,13 @@ public class Tele extends OpMode {
 
         // --- Intake Controls (Controller 1) ---
         // Right Bumper: Intake Toggle (Press once to turn ON, press again to stop)
+        /*
         if (gamepad1.right_bumper && !lastGamepad1RightBumperState) {
             intakeToggleOn = !intakeToggleOn;
         }
         lastGamepad1RightBumperState = gamepad1.right_bumper;
+
+         */
 
         // Left Trigger (Hold): Intake IN - overrides toggle
         // Left Bumper: Intake OUT (Reverse/Unjam) - overrides toggle
@@ -847,17 +850,11 @@ public class Tele extends OpMode {
             }
         }
 
-        // At 3000ms, check distance sensor - if > 20cm, ball not in transfer, restart cycle
-        if (shootSequenceTimer.milliseconds() >= 1500 && !distanceCheckPassed) {
+// CONTINUOUS DISTANCE CHECK (Starts after 200ms to allow trapdoor movement)
+        if (shootSequenceTimer.milliseconds() >= 200 && !distanceCheckPassed) {
             double distance = distanceSensor.getDistance(DistanceUnit.CM);
-            if (distance > 20) {
-                // Ball not detected, restart the cycle
-                restartShootSequence();
-                return;
-            } else {
-                // Ball detected, proceed with transfers
+            if (distance < 20) { // Ball Detected
                 distanceCheckPassed = true;
-                // Only close trapdoors if manual override is not set
                 if (!manualBothTrapdoorsOverride) {
                     leftTrapdoor.setPosition(0.1);
                     rightTrapdoor.setPosition(0.1);
@@ -865,15 +862,22 @@ public class Tele extends OpMode {
             }
         }
 
-        // After 2000ms and distance check passed, set the transfers ONLY if RPM is ready
-        if (shootSequenceTimer.milliseconds() >= 2000 && distanceCheckPassed && rpmReady && !shotFired) {
+        // TIMEOUT SAFETY (3 seconds)
+        if (shootSequenceTimer.milliseconds() >= 3000 && !distanceCheckPassed) {
+            restartShootSequence();
+            return;
+        }
+
+        // IMMEDIATE FIRE TRIGGER
+        // If distance passed AND rpm is ready -> FIRE! (No 2000ms wait)
+        if (distanceCheckPassed && rpmReady && !shotFired) {
             rightTransfer.setPosition(0.0);
             leftTransfer.setPosition(0.5);
             shotFired = true;
-            shotFiredTimer.reset();  // Start timer for sequence end
+            shotFiredTimer.reset();
         }
 
-        // End the sequence 1 second after the shot was fired
+        // End sequence 1 second after firing
         if (shotFired && shotFiredTimer.milliseconds() >= 1000) {
             rightTrapdoor.setPosition(0.1);
             leftTrapdoor.setPosition(0.1);
@@ -882,11 +886,9 @@ public class Tele extends OpMode {
             rightTransfer.setPosition(0.5);
             leftTransfer.setPosition(0.0);
 
-            // Turn off shooter and intake at end of sequence
-            shooter.setPower(0.0);
-            shooterSpeedOn = false;  // Turn off shooter speed toggle
+            // shooter.setPower(0.0);
+            // shooterSpeedOn = false;
 
-            // Reset state variables to match physical state
             leftTrapdoorOpen = false;
             rightTrapdoorOpen = false;
             bothTrapdoorsOpen = false;
@@ -925,8 +927,8 @@ public class Tele extends OpMode {
         leftTransfer.setPosition(0.0);
 
         // Stop motors
-        shooter.setPower(0.0);
-        shooterSpeedOn = false;  // Turn off shooter speed toggle
+        // shooter.setPower(0.0);
+        // shooterSpeedOn = false;  // Turn off shooter speed toggle
         intake.setPower(0.0);
 
         // Reset state variables to match physical state

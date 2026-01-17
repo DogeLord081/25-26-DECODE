@@ -19,8 +19,8 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import android.graphics.Color;
 
-@Autonomous(name = "DECODE 25-26 Auto")
-public class Auto extends OpMode {
+@Autonomous(name = "DECODE 25-26 AutoRed")
+public class AutoRed extends OpMode {
 
     private Follower follower;
     private Timer pathTimer, opmodeTimer;
@@ -70,12 +70,12 @@ public class Auto extends OpMode {
     private char[] ballOrder = new char[3];
 
     /* Define poses for the autonomous routine */
-    private final Pose startPose = new Pose(57.328, 134.590, Math.toRadians(270));
-    private final Pose scorePose = new Pose(52.328, 115.18032786885244, Math.toRadians(250));
-    private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(325));
-    private final Pose joltPose = new Pose(55.328, 97.18032786885244, Math.toRadians(325));
-    private final Pose afterShootPose = new Pose(41.55750819672132, 73.73770491803278, Math.toRadians(180));
-    private final Pose intakeBallsPose = new Pose(8.55750819672132, 73.73770491803278, Math.toRadians(180));
+    private final Pose startPose = new Pose(57.328, 134.590, Math.toRadians(270)).mirror();
+    private final Pose scorePose = new Pose(52.328, 115.18032786885244, Math.toRadians(250)).mirror();
+    private final Pose afterScanPose = new Pose(52.328, 105.18032786885244, Math.toRadians(325)).mirror();
+    private final Pose joltPose = new Pose(55.328, 102.18032786885244, Math.toRadians(325)).mirror();
+    private final Pose afterShootPose = new Pose(41.55750819672132, 59.73770491803278, Math.toRadians(180)).mirror();
+    private final Pose intakeBallsPose = new Pose(7.55750819672132, 59.73770491803278, Math.toRadians(180)).mirror();
 
     /* Path and PathChain declarations */
     private Path scorePreload;
@@ -162,7 +162,8 @@ public class Auto extends OpMode {
             case 1:
                 /* Wait until the robot has finished following the path */
                 controlShooterPID();  // Keep controlling shooter
-                if (!follower.isBusy()) {                    /* Move to state 2 to scan for AprilTag */
+                if (!follower.isBusy()) {
+                    /* Move to state 2 to scan for AprilTag */
                     setPathState(2);
                 }
                 break;
@@ -284,7 +285,6 @@ public class Auto extends OpMode {
             case 8:
                 /* Arrived at afterShootPose, go to Scan Pose */
                 if(!follower.isBusy()){
-
                     shooter.setPower(0.5); // Spin up shooter again
                     follower.followPath(returnToScanPath);
                     setPathState(9);
