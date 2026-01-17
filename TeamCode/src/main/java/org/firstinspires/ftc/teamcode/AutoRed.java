@@ -43,7 +43,7 @@ public class AutoRed extends OpMode {
     private ColorSensor colorSensorRight;
 
     // Shooter constants
-    private static final double TARGET_RPM = 1900.0;
+    private static final double TARGET_RPM = 1850.0;
     private static final double RPM_TOLERANCE_PERCENT = 0.05;  // 5% tolerance
     private static final double SHOOTER_TICKS_PER_REV = 28.0;
 
@@ -65,17 +65,21 @@ public class AutoRed extends OpMode {
     // *** NEW VARIABLE FOR JOLT LOGIC ***
     private boolean thirdBallJoltDone = false;
 
+    // New jolt delay timer/state
+    private ElapsedTime joltDelayTimer = new ElapsedTime();
+    private int joltNextState = -1;
+
     // Ball order based on AprilTag (P = Purple/Left, G = Green/Right)
     // ID 1: PPG, ID 2: PGP, ID 3: GPP
     private char[] ballOrder = new char[3];
 
     /* Define poses for the autonomous routine */
-    private final Pose startPose = new Pose(57.328, 134.590, Math.toRadians(270)).mirror();
-    private final Pose scorePose = new Pose(52.328, 115.18032786885244, Math.toRadians(250)).mirror();
-    private final Pose afterScanPose = new Pose(52.328, 105.18032786885244, Math.toRadians(325)).mirror();
-    private final Pose joltPose = new Pose(55.328, 102.18032786885244, Math.toRadians(325)).mirror();
-    private final Pose afterShootPose = new Pose(41.55750819672132, 59.73770491803278, Math.toRadians(180)).mirror();
-    private final Pose intakeBallsPose = new Pose(7.55750819672132, 59.73770491803278, Math.toRadians(180)).mirror();
+    private final Pose startPose = new Pose(21.63157142857142, 129.60802107728338, Math.toRadians(322)).mirror();
+    private final Pose scorePose = new Pose(47.328, 115.18032786885244, Math.toRadians(250)).mirror();
+    private final Pose afterScanPose = new Pose(47.328, 105.18032786885244, Math.toRadians(323)).mirror();
+    private final Pose joltPose = new Pose(50.328, 102.18032786885244, Math.toRadians(323)).mirror();
+    private final Pose afterShootPose = new Pose(44.55750819672132, 54, Math.toRadians(180)).mirror();
+    private final Pose intakeBallsPose = new Pose(15, 51, Math.toRadians(180)).mirror();
 
     /* Path and PathChain declarations */
     private Path scorePreload;
@@ -135,7 +139,7 @@ public class AutoRed extends OpMode {
         // *** EMERGENCY PARK LOGIC ***
         // If we have crossed 27 seconds and aren't already parking, abort and move to park
         // We check pathState != 99 and != 100 to ensure we don't re-trigger this once started
-        if (opmodeTimer.getElapsedTimeSeconds() > 28.8 && pathState != 99 && pathState != 100) {
+        if (opmodeTimer.getElapsedTimeSeconds() > 28.5 && pathState != 99 && pathState != 100) {
             // Shut down mechanisms
             shooter.setPower(0);
             intake.setPower(0);
@@ -162,8 +166,7 @@ public class AutoRed extends OpMode {
             case 1:
                 /* Wait until the robot has finished following the path */
                 controlShooterPID();  // Keep controlling shooter
-                if (!follower.isBusy()) {
-                    /* Move to state 2 to scan for AprilTag */
+                if (!follower.isBusy()) {                    /* Move to state 2 to scan for AprilTag */
                     setPathState(2);
                 }
                 break;
@@ -230,10 +233,20 @@ public class AutoRed extends OpMode {
                 if (currentBallIndex == 2 && !thirdBallJoltDone) {
                     leftTrapdoor.setPosition(0.0);
                     rightTrapdoor.setPosition(0.2);
-                    follower.followPath(joltPath);
-                    setPathState(41);
+                    // Start 500ms delay before performing the jolt
+                    joltDelayTimer.reset();
+                    joltNextState = 41; // After delay, go to Jolt Out state
+                    setPathState(40); // Intermediate delay state
                 } else {
                     executeShootingSequence(false); // False = Don't use sensors, use fixed assumption
+                }
+                break;
+
+            case 40: // Jolt delay (wait 500ms after opening trapdoors)
+                controlShooterPID();
+                if (joltDelayTimer.seconds() >= 0.5) {
+                    follower.followPath(joltPath);
+                    setPathState(joltNextState);
                 }
                 break;
 
@@ -254,7 +267,6 @@ public class AutoRed extends OpMode {
                     setPathState(4);
                 }
                 break;
-
             case 5:
                 /* All balls shot, go to afterShootPose */
                 shooter.setPower(0);
@@ -276,15 +288,30 @@ public class AutoRed extends OpMode {
                     intake.setPower(0);
                     // Start return trip
                     follower.followPath(returnToAfterShootPath);
+
+                    // Prepare to preload first ball during the return trip
+                    // Reset timers/flags so executeFirstBallLoading() can run while moving
+                    shootTimer.reset();
+                    shotFired = false;
+                    distanceCheckPassed = false;
+                    shootSideDecided = false;
+                    currentBallIndex = 0; // We'll be preloading ball index 0
+
                     setPathState(8);
                 }
                 break;
 
-            // *** NEW RETURN AND SECOND SHOOTING LOGIC ***
-
             case 8:
                 /* Arrived at afterShootPose, go to Scan Pose */
+                controlShooterPID();
+                // While we're still traveling back to the scan/shoot pose, try to preload the first ball
+                if (follower.isBusy()) {
+                    // Preload the first ball in parallel with motion
+                    executeFirstBallLoading();
+                }
+
                 if(!follower.isBusy()){
+
                     shooter.setPower(0.5); // Spin up shooter again
                     follower.followPath(returnToScanPath);
                     setPathState(9);
@@ -294,17 +321,31 @@ public class AutoRed extends OpMode {
             case 9:
                 /* Arrived back at Shooting Position */
                 controlShooterPID();
+
+                // While traveling the final leg to the shooting point, continue preloading
+                if (follower.isBusy()) {
+                    executeFirstBallLoading();
+                }
+
                 if(!follower.isBusy()){
                     follower.holdPoint(afterScanPose);
+
+                    // Preserve whether the first ball actually got loaded during the return trip
+                    boolean preloaded = distanceCheckPassed;
 
                     // Reset variables for Round 2
                     currentBallIndex = 0;
                     shotFired = false;
-                    distanceCheckPassed = false;
+                    // Preserve distanceCheckPassed so Round 2 can immediately use the preloaded ball
+                    // (Don't clear here; we'll apply the preserved `preloaded` value below)
                     thirdBallJoltDone = false;
                     shootSideDecided = false;
-                    firstBallPreloaded = false; // Not relevant for round 2
+                    // DO NOT force-clear firstBallPreloaded here — use the preserved value
                     shootTimer.reset();
+
+                    // Apply preserved preloaded state so Round 2 knows the ball is already in-transfer
+                    firstBallPreloaded = preloaded;
+                    distanceCheckPassed = preloaded;
 
                     setPathState(10);
                 }
@@ -318,8 +359,10 @@ public class AutoRed extends OpMode {
                 if (currentBallIndex == 2 && !thirdBallJoltDone) {
                     leftTrapdoor.setPosition(0.0);
                     rightTrapdoor.setPosition(0.2);
-                    follower.followPath(joltPath);
-                    setPathState(101); // Go to Jolt Out Round 2
+                    // Start 500ms delay before performing the jolt
+                    joltDelayTimer.reset();
+                    joltNextState = 101; // After delay, go to Jolt Out Round 2
+                    setPathState(40); // Reuse intermediate delay state
                 } else {
                     // True = Use sensors to find the correct ball
                     executeShootingSequence(true);
@@ -444,6 +487,17 @@ public class AutoRed extends OpMode {
 
         double elapsedMs = shootTimer.seconds() * 1000;  // Convert to milliseconds
         boolean isThirdBall = (currentBallIndex == 2);
+
+        // QUICK-FIRE: If Round 2 and we already preloaded the first ball during the return trip,
+        // allow an expedited fire without going through the full loading timing.
+        if (useSensors && currentBallIndex == 0 && firstBallPreloaded && distanceCheckPassed && !shotFired) {
+            if (elapsedMs >= 500 && isRPMReady()) {
+                leftTransfer.setPosition(0.5);
+                rightTransfer.setPosition(0.0);
+                shotFired = true;
+                shotFiredTimer.reset();
+            }
+        }
 
         // Pre-load logic only applies to Round 1 (useSensors == false)
         if (!useSensors && currentBallIndex == 0 && firstBallPreloaded && distanceCheckPassed && !shotFired) {
@@ -754,6 +808,8 @@ public class AutoRed extends OpMode {
 
         // Initialize velocity timer
         velocityTimer.reset();
+        // Initialize jolt delay timer
+        joltDelayTimer.reset();
     }
 
     /** This method is called continuously after Init while waiting for "play". **/

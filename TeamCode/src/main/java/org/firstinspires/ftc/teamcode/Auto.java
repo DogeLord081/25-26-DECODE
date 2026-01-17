@@ -65,12 +65,16 @@ public class Auto extends OpMode {
     // *** NEW VARIABLE FOR JOLT LOGIC ***
     private boolean thirdBallJoltDone = false;
 
+    // New jolt delay timer/state
+    private ElapsedTime joltDelayTimer = new ElapsedTime();
+    private int joltNextState = -1;
+
     // Ball order based on AprilTag (P = Purple/Left, G = Green/Right)
     // ID 1: PPG, ID 2: PGP, ID 3: GPP
     private char[] ballOrder = new char[3];
 
     /* Define poses for the autonomous routine */
-    private final Pose startPose = new Pose(57.328, 134.590, Math.toRadians(270));
+    private final Pose startPose = new Pose(26.63157142857142, 129.60802107728338, Math.toRadians(325));
     private final Pose scorePose = new Pose(52.328, 115.18032786885244, Math.toRadians(250));
     private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(325));
     private final Pose joltPose = new Pose(55.328, 97.18032786885244, Math.toRadians(325));
@@ -135,7 +139,7 @@ public class Auto extends OpMode {
         // *** EMERGENCY PARK LOGIC ***
         // If we have crossed 27 seconds and aren't already parking, abort and move to park
         // We check pathState != 99 and != 100 to ensure we don't re-trigger this once started
-        if (opmodeTimer.getElapsedTimeSeconds() > 28.8 && pathState != 99 && pathState != 100) {
+        if (opmodeTimer.getElapsedTimeSeconds() > 28.5 && pathState != 99 && pathState != 100) {
             // Shut down mechanisms
             shooter.setPower(0);
             intake.setPower(0);
@@ -229,10 +233,20 @@ public class Auto extends OpMode {
                 if (currentBallIndex == 2 && !thirdBallJoltDone) {
                     leftTrapdoor.setPosition(0.0);
                     rightTrapdoor.setPosition(0.2);
-                    follower.followPath(joltPath);
-                    setPathState(41);
+                    // Start 500ms delay before performing the jolt
+                    joltDelayTimer.reset();
+                    joltNextState = 41; // After delay, go to Jolt Out state
+                    setPathState(40); // Intermediate delay state
                 } else {
                     executeShootingSequence(false); // False = Don't use sensors, use fixed assumption
+                }
+                break;
+
+            case 40: // Jolt delay (wait 500ms after opening trapdoors)
+                controlShooterPID();
+                if (joltDelayTimer.seconds() >= 0.5) {
+                    follower.followPath(joltPath);
+                    setPathState(joltNextState);
                 }
                 break;
 
@@ -345,8 +359,10 @@ public class Auto extends OpMode {
                 if (currentBallIndex == 2 && !thirdBallJoltDone) {
                     leftTrapdoor.setPosition(0.0);
                     rightTrapdoor.setPosition(0.2);
-                    follower.followPath(joltPath);
-                    setPathState(101); // Go to Jolt Out Round 2
+                    // Start 500ms delay before performing the jolt
+                    joltDelayTimer.reset();
+                    joltNextState = 101; // After delay, go to Jolt Out Round 2
+                    setPathState(40); // Reuse intermediate delay state
                 } else {
                     // True = Use sensors to find the correct ball
                     executeShootingSequence(true);
@@ -792,6 +808,8 @@ public class Auto extends OpMode {
 
         // Initialize velocity timer
         velocityTimer.reset();
+        // Initialize jolt delay timer
+        joltDelayTimer.reset();
     }
 
     /** This method is called continuously after Init while waiting for "play". **/

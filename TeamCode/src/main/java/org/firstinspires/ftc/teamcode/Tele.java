@@ -150,7 +150,7 @@ public class Tele extends OpMode {
     private boolean lastGamepad2LeftTriggerState = false;
 
     // Minimum shooter RPM when idling (for faster windup)
-    private static final double MIN_IDLE_SHOOTER_RPM = 2000;
+    private static final double MIN_IDLE_SHOOTER_RPM = 1800;
 
     // Auto shoot (Right Trigger or Button?) - Image says "Auto shoot". Assuming RT based on position.
     // No toggle needed if it's a sequence trigger, but we need debouncing.
@@ -259,6 +259,9 @@ public class Tele extends OpMode {
 
         leftLift.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         rightLift.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+
+        leftKickerArm.setPosition(0.0);
+        rightKickerArm.setPosition(0.5);
     }
 
     @Override
