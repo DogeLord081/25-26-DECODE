@@ -14,6 +14,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import com.qualcomm.robotcore.hardware.DistanceSensor;
 import com.qualcomm.hardware.dfrobot.HuskyLens;
+import android.graphics.Color;
 
 
 @com.qualcomm.robotcore.eventloop.opmode.TeleOp (name = "Tele")
@@ -103,6 +104,7 @@ public class Tele extends OpMode {
     private int detectedTagX = -1;
     private boolean tagDetected = false;
     private double autoAimRotation = 0.0;
+    private double lockedShooterRPM = 0.0;
     private boolean isAimed = false;
     private double approachAngle = 90.0;
     private int targetXPixels = HUSKYLENS_WIDTH / 2;
@@ -528,10 +530,9 @@ public class Tele extends OpMode {
         int currentShooterPosition = shooter.getCurrentPosition();
         double deltaTime = velocityTimer.seconds();
 
-        if (deltaTime > 0.02) {  // Update velocity every 20ms
+        if (deltaTime > 0.02) {
             int deltaTicks = currentShooterPosition - lastShooterEncoderPosition;
             double ticksPerSecond = Math.abs(deltaTicks / deltaTime);
-            // Convert ticks/second to RPM: (ticks/sec) / (ticks/rev) * 60 = RPM
             shooterRPM = (ticksPerSecond / SHOOTER_TICKS_PER_REV) * 60.0;
             lastShooterEncoderPosition = currentShooterPosition;
             velocityTimer.reset();
