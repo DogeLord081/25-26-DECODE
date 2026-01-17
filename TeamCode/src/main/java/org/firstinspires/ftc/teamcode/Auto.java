@@ -74,7 +74,7 @@ public class Auto extends OpMode {
     private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(325));
     private final Pose joltPose = new Pose(55.328, 97.18032786885244, Math.toRadians(325));
     private final Pose afterShootPose = new Pose(41.55750819672132, 73.73770491803278, Math.toRadians(180));
-    private final Pose intakeBallsPose = new Pose(10.55750819672132, 73.73770491803278, Math.toRadians(180));
+    private final Pose intakeBallsPose = new Pose(6.55750819672132, 73.73770491803278, Math.toRadians(180));
 
     /* Path and PathChain declarations */
     private Path scorePreload;
