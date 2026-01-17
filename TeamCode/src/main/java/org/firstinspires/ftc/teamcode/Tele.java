@@ -525,7 +525,7 @@ public class Tele extends OpMode {
         }
         lastGamepad2LeftTriggerState = leftTriggerPressed;
 
-        // ========== SHOOTER RPM TRACKING AND PID CONTROL ==========
+// ========== SHOOTER RPM TRACKING AND PID CONTROL ==========
         // Calculate shooter RPM from encoder
         int currentShooterPosition = shooter.getCurrentPosition();
         double deltaTime = velocityTimer.seconds();
@@ -539,12 +539,13 @@ public class Tele extends OpMode {
         }
 
         // PID control for shooter RPM
-        // Determine effective target RPM:
-        // - If shooter is off: 0 RPM
-        // - If shooter is on but not auto-aiming at a tag: idle RPM
-        // - If shooter is on AND auto-aiming at a tag: full RPM from lookup table
         double effectiveTargetRPM = 0.0;
-        if (shooterSpeedOn) {
+
+        // LOGIC CHANGE:
+        // If a sequence is active, we MUST use the locked RPM, otherwise use the live target
+        if (shootSequenceActive) {
+            effectiveTargetRPM = lockedShooterRPM;
+        } else if (shooterSpeedOn) {
             if (autoAimEnabled && tagDetected && targetShooterRPM > 0) {
                 effectiveTargetRPM = targetShooterRPM;
             } else {
@@ -555,31 +556,23 @@ public class Tele extends OpMode {
         if (effectiveTargetRPM > 0) {
             double error = effectiveTargetRPM - shooterRPM;
 
-            // Integrate error (with anti-windup)
             shooterIntegral += error * deltaTime;
             shooterIntegral = Range.clip(shooterIntegral, -5000, 5000);
 
-            // Calculate derivative
             double derivative = (error - shooterLastError) / deltaTime;
             shooterLastError = error;
 
-            // Calculate feedforward (base power to reach target RPM)
             double feedforward = effectiveTargetRPM * SHOOTER_KF;
-
-            // Calculate PID output
             double pidOutput = (SHOOTER_KP * error) + (SHOOTER_KI * shooterIntegral) + (SHOOTER_KD * derivative);
 
-            // Combine feedforward and PID
             shooterPower = feedforward + pidOutput;
             shooterPower = Range.clip(shooterPower, 0.0, 1.0);
         } else {
-            // Reset PID state when shooter is off
             shooterPower = 0.0;
             shooterIntegral = 0.0;
             shooterLastError = 0.0;
         }
 
-        // Set shooter power
         shooter.setPower(shooterPower);
 
         // Check if RPM is within tolerance for auto transfer
