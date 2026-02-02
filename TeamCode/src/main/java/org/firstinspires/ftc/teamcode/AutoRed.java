@@ -44,6 +44,7 @@ public class AutoRed extends OpMode {
 
     // Shooter constants
     private static final double TARGET_RPM = 1850.0;
+    private static final double THIRD_BALL_RPM = 1780.0;
     private static final double RPM_TOLERANCE_PERCENT = 0.05;  // 5% tolerance
     private static final double SHOOTER_TICKS_PER_REV = 28.0;
 
@@ -426,21 +427,34 @@ public class AutoRed extends OpMode {
         }
     }
 
-    /** Simple proportional control for shooter RPM **/
+    // Helper to return correct target RPM (third ball only)
+    private double getTargetRPM() {
+        // Use third-ball RPM only while in shooting states and for the 3rd ball (index 2)
+        boolean inShootingState = (pathState == 4 || pathState == 41 || pathState == 42
+                || pathState == 10 || pathState == 101 || pathState == 102);
+        if (currentBallIndex == 2 && inShootingState) {
+            return THIRD_BALL_RPM;
+        }
+        return TARGET_RPM;
+    }
+
+    // Updated controlShooterPID() to use getTargetRPM()
     private void controlShooterPID() {
-        double error = TARGET_RPM - shooterRPM;
+        double target = getTargetRPM();
+        double error = target - shooterRPM;
         double kP = 0.0003;
         double kF = 1.0 / 4900.0;  // Feedforward based on max RPM
 
-        double power = (TARGET_RPM * kF) + (error * kP);
+        double power = (target * kF) + (error * kP);
         power = Math.max(0.0, Math.min(1.0, power));
         shooter.setPower(power);
     }
 
-    /** Check if RPM is within tolerance **/
+    // Updated isRPMReady() to use getTargetRPM()
     private boolean isRPMReady() {
-        double rpmLowerBound = TARGET_RPM * (1.0 - RPM_TOLERANCE_PERCENT);
-        double rpmUpperBound = TARGET_RPM * (1.0 + RPM_TOLERANCE_PERCENT);
+        double target = getTargetRPM();
+        double rpmLowerBound = target * (1.0 - RPM_TOLERANCE_PERCENT);
+        double rpmUpperBound = target * (1.0 + RPM_TOLERANCE_PERCENT);
         return shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
     }
 
@@ -706,7 +720,7 @@ public class AutoRed extends OpMode {
 
         // Shooter status
         telemetry.addData("--- SHOOTER ---", "");
-        telemetry.addData("Target RPM", TARGET_RPM);
+        telemetry.addData("Target RPM", "%.0f", getTargetRPM());
         telemetry.addData("Current RPM", "%.0f", shooterRPM);
         telemetry.addData("RPM Ready", isRPMReady() ? "YES" : "NO");
 

@@ -429,8 +429,8 @@ public class Tele extends OpMode {
                 leftTrapdoor.setPosition(0.0);
                 rightTrapdoor.setPosition(0.0);
             } else {
-                leftTrapdoor.setPosition(0.1);
-                rightTrapdoor.setPosition(0.1);
+                leftTrapdoor.setPosition(0.2);
+                rightTrapdoor.setPosition(0.0);
             }
         }
         lastGamepad2XState = gamepad2.x;
@@ -442,8 +442,8 @@ public class Tele extends OpMode {
                 rightTrapdoor.setPosition(0.2);
                 leftTrapdoor.setPosition(0.2);
             } else {
-                rightTrapdoor.setPosition(0.1);
-                leftTrapdoor.setPosition(0.1);
+                rightTrapdoor.setPosition(0.0);
+                leftTrapdoor.setPosition(0.2);
             }
         }
         lastGamepad2BState = gamepad2.b;
@@ -461,8 +461,8 @@ public class Tele extends OpMode {
                     manualBothTrapdoorsOverride = true;
                 }
             } else {
-                rightTrapdoor.setPosition(0.1);
-                leftTrapdoor.setPosition(0.1);
+                rightTrapdoor.setPosition(0.0);
+                leftTrapdoor.setPosition(0.2);
                 leftTrapdoorOpen = false;
                 rightTrapdoorOpen = false;
             }
