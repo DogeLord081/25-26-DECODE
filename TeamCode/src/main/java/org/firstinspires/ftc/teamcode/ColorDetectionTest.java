@@ -114,8 +114,8 @@ public class ColorDetectionTest extends LinearOpMode {
         // Purple: Hue 120-160, Saturation > 30, Value > 30
 
         // HSV ranges for green (OpenCV uses H: 0-180, S: 0-255, V: 0-255)
-        private static final int GREEN_HUE_MIN = 35;
-        private static final int GREEN_HUE_MAX = 85;
+        private static final int GREEN_HUE_MIN = 70;
+        private static final int GREEN_HUE_MAX = 100;
         private static final int GREEN_SAT_MIN = 50;
         private static final int GREEN_VAL_MIN = 50;
 

@@ -166,11 +166,11 @@ public class Tele extends OpMode {
     private boolean autoTransferTriggered = false;  // For RPM-based auto transfer
     private boolean distanceCheckPassed = false; // Tracks if ball was detected at 3000ms
     private boolean shotFired = false;  // Tracks if the transfer was opened (shot fired)
+    private boolean intakeReversed = false; // Tracks if intake was reversed after distance check
     private boolean kickLeft = false; // Track if left side should be kicked
     private boolean kickRight = false; // Track if right side should be kicked
     private boolean singleBallMode = false; // True if proximity > 6.5 (only one ball)
     private boolean trapdoorsOpenedForSingleBall = false; // Track if trapdoors were opened in single ball mode
-    private boolean manualBothTrapdoorsOverride = false; // Track if Y button (both trapdoors) was pressed during auto shoot
 
     // Debug timing
     private ElapsedTime debugTimer = new ElapsedTime();
@@ -450,7 +450,7 @@ public class Tele extends OpMode {
         if (gamepad2.x && !lastGamepad2XState) {
             leftTrapdoorOpen = !leftTrapdoorOpen;
             if (leftTrapdoorOpen) {
-                leftTrapdoor.setPosition(0.0);  // Open
+                leftTrapdoor.setPosition(0.2);  // Open
                 rightTrapdoor.setPosition(0.1);  // Keep right closed
             } else {
                 leftTrapdoor.setPosition(0.1);  // Closed
@@ -463,7 +463,7 @@ public class Tele extends OpMode {
         if (gamepad2.b && !lastGamepad2BState) {
             rightTrapdoorOpen = !rightTrapdoorOpen;
             if (rightTrapdoorOpen) {
-                rightTrapdoor.setPosition(0.2);  // Open
+                rightTrapdoor.setPosition(0.0);  // Open
                 leftTrapdoor.setPosition(0.1);  // Keep left closed
             } else {
                 rightTrapdoor.setPosition(0.1);  // Closed
@@ -476,14 +476,10 @@ public class Tele extends OpMode {
         if (gamepad2.y && !lastGamepad2YState) {
             bothTrapdoorsOpen = !bothTrapdoorsOpen;
             if (bothTrapdoorsOpen) {
-                leftTrapdoor.setPosition(0.0);  // Open
-                rightTrapdoor.setPosition(0.2);  // Open
+                leftTrapdoor.setPosition(0.2);  // Open
+                rightTrapdoor.setPosition(0.0);  // Open
                 leftTrapdoorOpen = true;
                 rightTrapdoorOpen = true;
-                // If during auto shoot sequence, set the manual override flag
-                if (shootSequenceActive) {
-                    manualBothTrapdoorsOverride = true;
-                }
             } else {
                 leftTrapdoor.setPosition(0.1);  // Closed
                 rightTrapdoor.setPosition(0.1);  // Closed
@@ -738,9 +734,7 @@ public class Tele extends OpMode {
         shootSequenceActive = true;
         shootSequenceTimer.reset();
         shotFired = false;
-
-        // If both trapdoors were manually opened before starting, set the override flag
-        manualBothTrapdoorsOverride = bothTrapdoorsOpen;
+        intakeReversed = false;
 
         // Enable shooter so PID control will run the motor to target RPM
         shooterSpeedOn = true;
@@ -781,24 +775,23 @@ public class Tele extends OpMode {
             // No color detected on either side (both NEITHER) - open both trapdoors
             kickLeft = true;
             kickRight = true;
-            manualBothTrapdoorsOverride = true;  // Treat as both trapdoors open
         }
 
         singleBallMode = false;
         trapdoorsOpenedForSingleBall = false;
 
-        if (manualBothTrapdoorsOverride) {
+        if (kickLeft && kickRight) {
             // Both trapdoors open
-            leftTrapdoor.setPosition(0.0);   // Open
-            rightTrapdoor.setPosition(0.2);  // Open
-        } else if (kickLeft) {
-            // Left Trapdoor Open
-            leftTrapdoor.setPosition(0.0);   // Open
-            rightTrapdoor.setPosition(0.1);  // Closed
+            leftTrapdoor.setPosition(0.2);   // Open
+            rightTrapdoor.setPosition(0.0);  // Open
         } else if (kickRight) {
+            // Left Trapdoor Open
+            leftTrapdoor.setPosition(0.2);   // Open
+            rightTrapdoor.setPosition(0.2);  // Closed
+        } else if (kickLeft) {
             // Right Trapdoor Open
-            leftTrapdoor.setPosition(0.1);   // Closed
-            rightTrapdoor.setPosition(0.2);  // Open
+            leftTrapdoor.setPosition(0.0);   // Closed
+            rightTrapdoor.setPosition(0.0);  // Open
         } else {
             // No selection, ensure closed
             leftTrapdoor.setPosition(0.1);   // Closed
@@ -832,13 +825,25 @@ public class Tele extends OpMode {
                 leftTransfer.setPosition(0.0);   // UP position
                 rightTransfer.setPosition(0.5);  // UP position
                 transfersUp = true;
-                // Close both trapdoors at the same time
+
+                // Spin intake forward to push ball up
+                intake.setPower(1.0);
+                intakeReversed = false;
+                transferTimer.reset();  // Start timer for intake reversal
+
+                // Close both trapdoors immediately
                 leftTrapdoor.setPosition(0.1);   // Closed
                 rightTrapdoor.setPosition(0.1);  // Closed
                 leftTrapdoorOpen = false;
                 rightTrapdoorOpen = false;
                 bothTrapdoorsOpen = false;
             }
+        }
+
+        // After 50ms, set intake back to -1.0
+        if (distanceCheckPassed && !intakeReversed && transferTimer.milliseconds() >= 50) {
+            intake.setPower(-1.0);
+            intakeReversed = true;
         }
 
         // TIMEOUT SAFETY (3 seconds)
@@ -877,11 +882,11 @@ public class Tele extends OpMode {
             shootSequenceActive = false;
             distanceCheckPassed = false;
             shotFired = false;
+            intakeReversed = false;
             kickLeft = false;
             kickRight = false;
             singleBallMode = false;
             trapdoorsOpenedForSingleBall = false;
-            manualBothTrapdoorsOverride = false;
         }
     }
 
@@ -890,11 +895,11 @@ public class Tele extends OpMode {
         shootSequenceActive = false;
         distanceCheckPassed = false;
         shotFired = false;
+        intakeReversed = false;
         kickLeft = false;
         kickRight = false;
         singleBallMode = false;
         trapdoorsOpenedForSingleBall = false;
-        manualBothTrapdoorsOverride = false;
 
         // Reset servos to closed positions
         leftTrapdoor.setPosition(0.1);
@@ -921,29 +926,30 @@ public class Tele extends OpMode {
         shootSequenceTimer.reset();
         distanceCheckPassed = false;
         shotFired = false;
+        intakeReversed = false;
 
         // Do NOT re-read color sensors - keep using the same kickLeft/kickRight values
         // that were originally determined until the ball passes the distance sensor check
 
-        // Check if manual override was used - if so, open both trapdoors
-        if (manualBothTrapdoorsOverride) {
-            leftTrapdoor.setPosition(0.0);  // Open
-            rightTrapdoor.setPosition(0.2);  // Open
+        // Check if both sides should be kicked (both trapdoors open)
+        if (kickLeft && kickRight) {
+            leftTrapdoor.setPosition(0.2);  // Open
+            rightTrapdoor.setPosition(0.0);  // Open
         } else if (singleBallMode) {
             // Single ball mode: open only left trapdoor
-            leftTrapdoor.setPosition(0.0);  // Open
+            leftTrapdoor.setPosition(0.2);  // Open
             rightTrapdoor.setPosition(0.1);  // Closed
         } else if (kickLeft) {
             // Left side only (prioritized when both match)
-            leftTrapdoor.setPosition(0.0);  // Open
+            leftTrapdoor.setPosition(0.2);  // Open
             rightTrapdoor.setPosition(0.1);  // Closed
         } else if (kickRight) {
             // Right side
-            rightTrapdoor.setPosition(0.2);  // Open
-            leftTrapdoor.setPosition(0.1);  // Closed
+            rightTrapdoor.setPosition(0.1);  // Closed
+            leftTrapdoor.setPosition(0.0);  // Open
         } else {
             // No match (backup - use left side)
-            leftTrapdoor.setPosition(0.0);  // Open
+            leftTrapdoor.setPosition(0.2);  // Open
             rightTrapdoor.setPosition(0.1);  // Closed
         }
 
