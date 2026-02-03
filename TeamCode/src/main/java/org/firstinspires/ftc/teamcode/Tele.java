@@ -1,9 +1,7 @@
 package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
-import android.graphics.Color;
 import android.util.Size;
-import com.qualcomm.robotcore.hardware.ColorSensor;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DistanceSensor;
 import com.qualcomm.robotcore.util.Range;
@@ -11,7 +9,6 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
-import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import com.qualcomm.hardware.dfrobot.HuskyLens;
 import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
@@ -37,8 +34,6 @@ public class Tele extends OpMode {
     protected Servo rightKickerArm;
     protected Servo leftHoodAdjustment;
     protected Servo rightHoodAdjustment;
-    protected ColorSensor colorSensorRight;
-    protected ColorSensor colorSensorLeft;
     protected IMU imu;
     protected DistanceSensor distanceSensor;
     protected HuskyLens huskyLens;
@@ -205,9 +200,6 @@ public class Tele extends OpMode {
         leftHoodAdjustment = hardwareMap.get(Servo.class, "leftHoodAdjustment");
         rightHoodAdjustment = hardwareMap.get(Servo.class, "rightHoodAdjustment");
 
-        // Initialize color sensors
-        colorSensorRight = hardwareMap.get(ColorSensor.class, "colorSensorRight");
-        colorSensorLeft = hardwareMap.get(ColorSensor.class, "colorSensorLeft");
 
         // Get the distance sensor and motor from hardwareMap
         distanceSensor = hardwareMap.get(DistanceSensor.class, "distanceSensor");
@@ -711,17 +703,6 @@ public class Tele extends OpMode {
         // Distance Sensor Telemetry
         telemetry.addData("Distance (cm)", "%.2f", distanceSensor.getDistance(DistanceUnit.CM));
 
-        // Color sensor telemetry (HSV)
-        float[] leftHSV = new float[3];
-        float[] rightHSV = new float[3];
-        Color.RGBToHSV(colorSensorLeft.red(), colorSensorLeft.green(), colorSensorLeft.blue(), leftHSV);
-        Color.RGBToHSV(colorSensorRight.red(), colorSensorRight.green(), colorSensorRight.blue(), rightHSV);
-        telemetry.addData("Left Color Sensor (H,S,V,D)", "(%.1f, %.2f, %.2f, %.3f)",
-                leftHSV[0], leftHSV[1], leftHSV[2], ((DistanceSensor) colorSensorLeft).getDistance(DistanceUnit.CM));
-        telemetry.addData("Right Color Sensor (H,S,V,D)", "(%.1f, %.2f, %.2f, %.3f)",
-                rightHSV[0], rightHSV[1], rightHSV[2], ((DistanceSensor) colorSensorRight).getDistance(DistanceUnit.CM));
-        telemetry.addData("Left Detected Color", leftHSV[0] > 175 ? "PURPLE" : "GREEN");
-        telemetry.addData("Right Detected Color", rightHSV[0] > 175 ? "PURPLE" : "GREEN");
 
         telemetry.update();
     }
