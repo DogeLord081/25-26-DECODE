@@ -2,6 +2,7 @@ package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import android.graphics.Color;
+import android.util.Size;
 import com.qualcomm.robotcore.hardware.ColorSensor;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DistanceSensor;
@@ -12,8 +13,10 @@ import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
-import com.qualcomm.robotcore.hardware.DistanceSensor;
 import com.qualcomm.hardware.dfrobot.HuskyLens;
+import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
+import org.firstinspires.ftc.vision.VisionPortal;
+import org.firstinspires.ftc.teamcode.ColorDetectionTest.ColorRegionProcessor;
 
 
 @com.qualcomm.robotcore.eventloop.opmode.TeleOp (name = "Tele")
@@ -39,6 +42,10 @@ public class Tele extends OpMode {
     protected IMU imu;
     protected DistanceSensor distanceSensor;
     protected HuskyLens huskyLens;
+
+    // Webcam color detection
+    protected ColorRegionProcessor colorProcessor;
+    protected VisionPortal visionPortal;
 
     // Motor correction multipliers (to make robot drive straight)
     // Original values: LF=0.3525, RF=0.35, LB=0.41, RB=0.3425
@@ -129,8 +136,8 @@ public class Tele extends OpMode {
     private boolean lastGamepad2BState = false; // Right Trapdoor
     private boolean lastGamepad2YState = false; // Both Trapdoors
 
-    // Transfer toggle (A Button)
-    private boolean transfersOpen = false;
+    // Transfer toggle (A Button) - UP = closed position, DOWN = open position
+    private boolean transfersUp = false;  // Start with transfers down (open)
     private boolean lastGamepad2AState = false;
 
     // Kicker Arm states (D-Pad toggles)
@@ -139,7 +146,7 @@ public class Tele extends OpMode {
     private boolean lastDpadLeftState = false;
     private boolean lastDpadRightState = false;
 
-    // Color selection state (Bumpers)
+    // Color selection state (Bumpers) - Left = Purple, Right = Green
     private boolean colorPurpleSelected = false;
     private boolean colorGreenSelected = false;
     private boolean lastGamepad2LeftBumperState = false;
@@ -253,15 +260,29 @@ public class Tele extends OpMode {
         leftHoodAdjustment.setPosition(leftHoodPosition);
         rightHoodAdjustment.setPosition(rightHoodPosition);
 
-        // Initialize trapdoors to closed position
+        // Initialize trapdoors to closed position (0.2 = closed, 0.0/0.2 = open)
         leftTrapdoor.setPosition(0.1);
         rightTrapdoor.setPosition(0.1);
+
+        // Initialize transfers to down position (DOWN = open = shooting position)
+        leftTransfer.setPosition(0.5);
+        rightTransfer.setPosition(0.0);
 
         leftLift.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         rightLift.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
         leftKickerArm.setPosition(0.0);
         rightKickerArm.setPosition(0.5);
+
+        // Initialize webcam color detection
+        colorProcessor = new ColorRegionProcessor();
+        visionPortal = new VisionPortal.Builder()
+                .setCamera(hardwareMap.get(WebcamName.class, "Webcam 1"))
+                .setCameraResolution(new Size(640, 480))
+                .addProcessor(colorProcessor)
+                .enableLiveView(true)
+                .setStreamFormat(VisionPortal.StreamFormat.MJPEG)
+                .build();
     }
 
     @Override
@@ -426,11 +447,11 @@ public class Tele extends OpMode {
         if (gamepad2.x && !lastGamepad2XState) {
             leftTrapdoorOpen = !leftTrapdoorOpen;
             if (leftTrapdoorOpen) {
-                leftTrapdoor.setPosition(0.0);
-                rightTrapdoor.setPosition(0.0);
+                leftTrapdoor.setPosition(0.0);  // Open
+                rightTrapdoor.setPosition(0.1);  // Keep right closed
             } else {
-                leftTrapdoor.setPosition(0.2);
-                rightTrapdoor.setPosition(0.0);
+                leftTrapdoor.setPosition(0.1);  // Closed
+                rightTrapdoor.setPosition(0.1);  // Keep right closed
             }
         }
         lastGamepad2XState = gamepad2.x;
@@ -439,11 +460,11 @@ public class Tele extends OpMode {
         if (gamepad2.b && !lastGamepad2BState) {
             rightTrapdoorOpen = !rightTrapdoorOpen;
             if (rightTrapdoorOpen) {
-                rightTrapdoor.setPosition(0.2);
-                leftTrapdoor.setPosition(0.2);
+                rightTrapdoor.setPosition(0.2);  // Open
+                leftTrapdoor.setPosition(0.1);  // Keep left closed
             } else {
-                rightTrapdoor.setPosition(0.0);
-                leftTrapdoor.setPosition(0.2);
+                rightTrapdoor.setPosition(0.1);  // Closed
+                leftTrapdoor.setPosition(0.1);  // Keep left closed
             }
         }
         lastGamepad2BState = gamepad2.b;
@@ -452,8 +473,8 @@ public class Tele extends OpMode {
         if (gamepad2.y && !lastGamepad2YState) {
             bothTrapdoorsOpen = !bothTrapdoorsOpen;
             if (bothTrapdoorsOpen) {
-                leftTrapdoor.setPosition(0.0);
-                rightTrapdoor.setPosition(0.2);
+                leftTrapdoor.setPosition(0.0);  // Open
+                rightTrapdoor.setPosition(0.2);  // Open
                 leftTrapdoorOpen = true;
                 rightTrapdoorOpen = true;
                 // If during auto shoot sequence, set the manual override flag
@@ -461,23 +482,25 @@ public class Tele extends OpMode {
                     manualBothTrapdoorsOverride = true;
                 }
             } else {
-                rightTrapdoor.setPosition(0.0);
-                leftTrapdoor.setPosition(0.2);
+                leftTrapdoor.setPosition(0.1);  // Closed
+                rightTrapdoor.setPosition(0.1);  // Closed
                 leftTrapdoorOpen = false;
                 rightTrapdoorOpen = false;
             }
         }
         lastGamepad2YState = gamepad2.y;
 
-        // A Button: Transfer toggle
+        // A Button: Transfer toggle (UP = closed, DOWN = open)
         if (gamepad2.a && !lastGamepad2AState) {
-            transfersOpen = !transfersOpen;
-            if (transfersOpen) {
-                leftTransfer.setPosition(0.5);
-                rightTransfer.setPosition(0.0);
-            } else {
+            transfersUp = !transfersUp;
+            if (transfersUp) {
+                // UP position (closed)
                 leftTransfer.setPosition(0.0);
                 rightTransfer.setPosition(0.5);
+            } else {
+                // DOWN position (open)
+                leftTransfer.setPosition(0.5);
+                rightTransfer.setPosition(0.0);
             }
         }
         lastGamepad2AState = gamepad2.a;
@@ -497,21 +520,17 @@ public class Tele extends OpMode {
         }
         lastDpadRightState = gamepad2.dpad_right;
 
-        // --- Bumpers: Ball Side Selection + Auto Shoot ---
-        // Left Bumper: Select ball on RIGHT side
+        // --- Bumpers: Color Selection ---
+        // Left Bumper: Select PURPLE color
         if (gamepad2.left_bumper && !lastGamepad2LeftBumperState) {
-            kickRight = true;
-            kickLeft = false;
-            colorPurpleSelected = true;  // Set a color so shoot sequence can start
+            colorPurpleSelected = true;
             colorGreenSelected = false;
         }
         lastGamepad2LeftBumperState = gamepad2.left_bumper;
 
-        // Right Bumper: Select ball on LEFT side
+        // Right Bumper: Select GREEN color
         if (gamepad2.right_bumper && !lastGamepad2RightBumperState) {
-            kickLeft = true;
-            kickRight = false;
-            colorGreenSelected = true;  // Set a color so shoot sequence can start
+            colorGreenSelected = true;
             colorPurpleSelected = false;
         }
         lastGamepad2RightBumperState = gamepad2.right_bumper;
@@ -626,10 +645,13 @@ public class Tele extends OpMode {
         // Close transfer after 2.5 seconds if auto transfer was triggered
         if (autoTransferTriggered && transferTimer.seconds() >= 2.5) {
             autoTransferTriggered = false;
-            transfersOpen = false;
-            leftTransfer.setPosition(0.0);
-            rightTransfer.setPosition(0.5);
+            transfersUp = false;  // Transfer goes down (open position)
+            leftTransfer.setPosition(0.5);
+            rightTransfer.setPosition(0.0);
         }
+
+        // Get webcam color detection for telemetry
+        ColorRegionProcessor.AnalysisResult colorResult = colorProcessor.getAnalysis();
 
         // ========== TELEMETRY ==========
         telemetry.addData("--- DRIVER (Gamepad 1) ---", "");
@@ -644,6 +666,11 @@ public class Tele extends OpMode {
             telemetry.addData("Tag X Position", "%d (target: %d)", detectedTagX, targetXPixels);
             telemetry.addData("Aimed", isAimed ? "YES" : "NO");
         }
+
+        telemetry.addData("--- WEBCAM COLOR DETECTION ---", "");
+        telemetry.addData("Left Camera", colorResult.leftColor);
+        telemetry.addData("Right Camera", colorResult.rightColor);
+        telemetry.addData("Selected Color", colorGreenSelected ? "GREEN" : (colorPurpleSelected ? "PURPLE" : "NONE"));
 
         telemetry.addData("--- SHOOTER ---", "");
         telemetry.addData("Shooter Enabled", shooterSpeedOn ? "ON" : "OFF");
@@ -665,10 +692,10 @@ public class Tele extends OpMode {
         // Show what's needed to shoot
         boolean readyToShoot = (colorPurpleSelected || colorGreenSelected);
         String shootMode = (tagDetected && autoAimEnabled) ? "TAG MODE" : "FALLBACK MODE";
-        telemetry.addData("Ready to Shoot", readyToShoot ? ("YES - " + shootMode + " - Press RT!") : "NO - Select Side");
+        telemetry.addData("Ready to Shoot", readyToShoot ? ("YES - " + shootMode + " - Press RT!") : "NO - Select Color");
         if (!readyToShoot) {
             String missing = "";
-            if (!(colorPurpleSelected || colorGreenSelected)) missing += "Side(LB/RB) ";
+            if (!(colorPurpleSelected || colorGreenSelected)) missing += "Color(LB=Purple/RB=Green) ";
             telemetry.addData("Missing", missing);
         }
 
@@ -676,7 +703,7 @@ public class Tele extends OpMode {
         telemetry.addData("Left Trapdoor", leftTrapdoorOpen ? "OPEN" : "CLOSED");
         telemetry.addData("Right Trapdoor", rightTrapdoorOpen ? "OPEN" : "CLOSED");
         telemetry.addData("Both Trapdoors", bothTrapdoorsOpen ? "OPEN" : "CLOSED");
-        telemetry.addData("Transfers", transfersOpen ? "OPEN" : "CLOSED");
+        telemetry.addData("Transfers", transfersUp ? "UP" : "DOWN");
         telemetry.addData("Left Kicker Arm", leftKickerArmOpen ? "OPEN" : "CLOSED");
         telemetry.addData("Right Kicker Arm", rightKickerArmOpen ? "OPEN" : "CLOSED");
         telemetry.addData("Ball Side Selected", kickLeft ? "LEFT" : (kickRight ? "RIGHT" : "NONE"));
@@ -716,95 +743,70 @@ public class Tele extends OpMode {
         // Enable shooter so PID control will run the motor to target RPM
         shooterSpeedOn = true;
 
-        /* COMMENTED OUT - Color sorting code
-        // Color detection logic
-        float[] leftHSV = new float[3];
-        float[] rightHSV = new float[3];
-        Color.RGBToHSV(colorSensorLeft.red(), colorSensorLeft.green(), colorSensorLeft.blue(), leftHSV);
-        Color.RGBToHSV(colorSensorRight.red(), colorSensorRight.green(), colorSensorRight.blue(), rightHSV);
+        // Use webcam color detection to determine which side to kick
+        ColorRegionProcessor.AnalysisResult colorResult = colorProcessor.getAnalysis();
+        String leftColor = colorResult.leftColor;
+        String rightColor = colorResult.rightColor;
 
-        // Check proximity sensors to determine if single ball mode
-        double leftProximity = ((DistanceSensor) colorSensorLeft).getDistance(DistanceUnit.CM);
-        double rightProximity = ((DistanceSensor) colorSensorRight).getDistance(DistanceUnit.CM);
-        singleBallMode = (leftProximity > 6.5 || rightProximity > 6.5);
-        trapdoorsOpenedForSingleBall = false;
+        // Determine which side has the selected color
+        kickLeft = false;
+        kickRight = false;
+        boolean leftMatchesSelected = false;
+        boolean rightMatchesSelected = false;
 
-        // Determine colors (Purple if hue > 175, otherwise Green)
-        boolean leftIsPurple = leftHSV[0] > 175;
-        boolean leftIsGreen = !leftIsPurple;
-        boolean rightIsPurple = rightHSV[0] > 175;
-        boolean rightIsGreen = !rightIsPurple;
-
-        boolean openLeft = false;
-        boolean openRight = false;
-
-        // Check against selected color logic
         if (colorPurpleSelected) {
-            if (leftIsPurple) openLeft = true;
-            if (rightIsPurple) openRight = true;
+            leftMatchesSelected = leftColor.equals("PURPLE");
+            rightMatchesSelected = rightColor.equals("PURPLE");
         } else if (colorGreenSelected) {
-            if (leftIsGreen) openLeft = true;
-            if (rightIsGreen) openRight = true;
+            leftMatchesSelected = leftColor.equals("GREEN");
+            rightMatchesSelected = rightColor.equals("GREEN");
         }
 
-        // Track which kicker arms should activate (only used if not single ball mode)
-        // If both balls are the same color, use proximity to determine which side:
-        // - If left proximity < 4 and right > 4, use left
-        // - If right proximity < 4 and left > 4, use right
-        // - Otherwise (both < 4 or both > 4), prioritize left
-        if (openLeft && openRight) {
-            boolean leftClose = leftProximity < 5;
-            boolean rightClose = rightProximity < 5;
-            if (leftClose && !rightClose) {
-                kickLeft = true;
-                kickRight = false;
-            } else if (rightClose && !leftClose) {
-                kickLeft = false;
-                kickRight = true;
-            } else {
-                // Both close or both far - prioritize left
-                kickLeft = true;
-                kickRight = false;
-            }
+        // Logic: If selected color is on left side, open left trapdoor and kick from left
+        // If selected color is on right side, open right trapdoor and kick from right
+        // If no color detected on either side (both NEITHER), open both trapdoors
+        if (leftMatchesSelected && !rightMatchesSelected) {
+            kickLeft = true;
+            kickRight = false;
+        } else if (rightMatchesSelected && !leftMatchesSelected) {
+            kickLeft = false;
+            kickRight = true;
+        } else if (leftMatchesSelected && rightMatchesSelected) {
+            // Both sides have the selected color - prioritize left
+            kickLeft = true;
+            kickRight = false;
         } else {
-            kickLeft = openLeft;
-            kickRight = openRight;
+            // No color detected on either side (both NEITHER) - open both trapdoors
+            kickLeft = true;
+            kickRight = true;
+            manualBothTrapdoorsOverride = true;  // Treat as both trapdoors open
         }
-        END COMMENTED OUT */
 
-        // Ball side is now selected directly via bumpers (kickLeft/kickRight already set)
         singleBallMode = false;
         trapdoorsOpenedForSingleBall = false;
 
-        if (singleBallMode) {
-            // Single ball mode: stop intake, open only left trapdoor
-            intake.setPower(0.0);
-            leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.0);  // Keep right closed (matches X button left trapdoor logic)
-        } else if (manualBothTrapdoorsOverride) {
-            // Both trapdoors were manually opened - keep them both open
-            leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.2);
+        if (manualBothTrapdoorsOverride) {
+            // Both trapdoors open
+            leftTrapdoor.setPosition(0.0);  // Open
+            rightTrapdoor.setPosition(0.2);  // Open
+        } else if (kickLeft) {
+            // Left Trapdoor Open
+            leftTrapdoor.setPosition(0.0);  // Open
+            rightTrapdoor.setPosition(0.0);  // Closed
+        } else if (kickRight) {
+            // Right Trapdoor Open
+            rightTrapdoor.setPosition(0.2);  // Open
+            leftTrapdoor.setPosition(0.2);  // Closed
         } else {
-            // Normal mode: Only open ONE trapdoor based on ball side selection (never both automatically)
-            if (kickLeft) {
-                // Left Trapdoor Open logic (matches X button)
-                leftTrapdoor.setPosition(0.0);
-                rightTrapdoor.setPosition(0.0);
-            } else if (kickRight) {
-                // Right Trapdoor Open logic (matches B button)
-                rightTrapdoor.setPosition(0.2);
-                leftTrapdoor.setPosition(0.2);
-            } else {
-                // No selection, ensure closed
-                leftTrapdoor.setPosition(0.2);
-                rightTrapdoor.setPosition(0.0);
-            }
+            // No selection, ensure closed
+            leftTrapdoor.setPosition(0.2);  // Closed
+            rightTrapdoor.setPosition(0.0);  // Closed
         }
 
-        // Immediate servo actions
-        leftTransfer.setPosition(0.0);
-        rightTransfer.setPosition(0.5);
+        // Set transfer to down (open) position for shooting
+        leftTransfer.setPosition(0.5);
+        rightTransfer.setPosition(0.0);
+        transfersUp = false;
     }
 
     private void executeShootSequence() {
@@ -859,8 +861,9 @@ public class Tele extends OpMode {
             if (distance < 20) { // Ball Detected
                 distanceCheckPassed = true;
                 if (!manualBothTrapdoorsOverride) {
-                    leftTrapdoor.setPosition(0.1);
-                    rightTrapdoor.setPosition(0.1);
+                    // Close both trapdoors
+                    leftTrapdoor.setPosition(0.2);  // Closed
+                    rightTrapdoor.setPosition(0.0);  // Closed
                 }
             }
         }
@@ -882,12 +885,12 @@ public class Tele extends OpMode {
 
         // End sequence 1 second after firing
         if (shotFired && shotFiredTimer.milliseconds() >= 1000) {
-            rightTrapdoor.setPosition(0.1);
-            leftTrapdoor.setPosition(0.1);
+            rightTrapdoor.setPosition(0.0);  // Closed
+            leftTrapdoor.setPosition(0.2);  // Closed
             leftKickerArm.setPosition(0.0);
             rightKickerArm.setPosition(0.5);
-            rightTransfer.setPosition(0.5);
-            leftTransfer.setPosition(0.0);
+            rightTransfer.setPosition(0.0);  // DOWN position
+            leftTransfer.setPosition(0.5);   // DOWN position
 
             // shooter.setPower(0.0);
             // shooterSpeedOn = false;
@@ -897,7 +900,7 @@ public class Tele extends OpMode {
             bothTrapdoorsOpen = false;
             leftKickerArmOpen = false;
             rightKickerArmOpen = false;
-            transfersOpen = false;
+            transfersUp = false;  // Transfer ends in down position
 
             shootSequenceActive = false;
             distanceCheckPassed = false;
@@ -926,8 +929,8 @@ public class Tele extends OpMode {
         rightTrapdoor.setPosition(0.0);
         leftKickerArm.setPosition(0.0);
         rightKickerArm.setPosition(0.5);
-        rightTransfer.setPosition(0.5);
-        leftTransfer.setPosition(0.0);
+        rightTransfer.setPosition(0.0);  // DOWN position
+        leftTransfer.setPosition(0.5);   // DOWN position
 
         // Stop motors
         // shooter.setPower(0.0);
@@ -940,7 +943,7 @@ public class Tele extends OpMode {
         bothTrapdoorsOpen = false;
         leftKickerArmOpen = false;
         rightKickerArmOpen = false;
-        transfersOpen = false;
+        transfersUp = false;  // Transfer ends in down position
     }
 
     private void restartShootSequence() {
@@ -954,29 +957,29 @@ public class Tele extends OpMode {
 
         // Check if manual override was used - if so, open both trapdoors
         if (manualBothTrapdoorsOverride) {
-            leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.2);
+            leftTrapdoor.setPosition(0.0);  // Open
+            rightTrapdoor.setPosition(0.2);  // Open
         } else if (singleBallMode) {
             // Single ball mode: open only left trapdoor
-            leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.0);
+            leftTrapdoor.setPosition(0.0);  // Open
+            rightTrapdoor.setPosition(0.0);  // Closed
         } else if (kickLeft) {
             // Left side only (prioritized when both match)
-            leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.0);
+            leftTrapdoor.setPosition(0.0);  // Open
+            rightTrapdoor.setPosition(0.0);  // Closed
         } else if (kickRight) {
             // Right side
-            rightTrapdoor.setPosition(0.2);
-            leftTrapdoor.setPosition(0.2);
+            rightTrapdoor.setPosition(0.2);  // Open
+            leftTrapdoor.setPosition(0.2);  // Closed
         } else {
             // No match (backup - use left side)
-            leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.0);
+            leftTrapdoor.setPosition(0.0);  // Open
+            rightTrapdoor.setPosition(0.0);  // Closed
         }
 
-        // Reset transfer positions
-        leftTransfer.setPosition(0.0);
-        rightTransfer.setPosition(0.5);
+        // Reset transfer positions (DOWN)
+        leftTransfer.setPosition(0.5);
+        rightTransfer.setPosition(0.0);
 
         // Reset kicker arms
         leftKickerArm.setPosition(0.0);
