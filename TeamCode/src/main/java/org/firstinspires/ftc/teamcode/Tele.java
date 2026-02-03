@@ -84,7 +84,7 @@ public class Tele extends OpMode {
     };
 
     // Shooter PID constants
-    private static final double SHOOTER_KP = 0.0002;
+    private static final double SHOOTER_KP = 0.002;
     private static final double SHOOTER_KI = 0.00001;
     private static final double SHOOTER_KD = 0.00001;
     private static final double SHOOTER_KF = 1.0 / MAX_SHOOTER_RPM;
@@ -225,10 +225,10 @@ public class Tele extends OpMode {
 
         // Set motor directions
         leftFront.setDirection(DcMotor.Direction.REVERSE);
-        leftBack.setDirection(DcMotor.Direction.REVERSE);
+        leftBack.setDirection(DcMotor.Direction.FORWARD);
         shooter.setDirection(DcMotor.Direction.REVERSE);
         rightFront.setDirection(DcMotor.Direction.FORWARD);
-        rightBack.setDirection(DcMotor.Direction.FORWARD);
+        rightBack.setDirection(DcMotor.Direction.REVERSE);
         //leftFront.setDirection(DcMotorSimple.Direction.REVERSE);
         //leftBack.setDirection(DcMotorSimple.Direction.REVERSE);
         rightFront.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
@@ -243,6 +243,11 @@ public class Tele extends OpMode {
         rightFront.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         rightBack.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         shooter.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+
+        leftFront.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        leftBack.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        rightFront.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        rightBack.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
         // Initialize velocity tracking for shooter
         velocityTimer.reset();
@@ -372,14 +377,20 @@ public class Tele extends OpMode {
                 rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
                 rightHoodAdjustment.setPosition(rightHoodPosition);
                 // When auto-aim enabled and tag detected, use full RPM from lookup table
-                targetShooterRPM = lookupRPM;
+                // Only set if not in active shoot sequence (let shoot sequence maintain its own target)
+                if (!shootSequenceActive) {
+                    targetShooterRPM = lookupRPM;
+                }
             } else {
                 // Not auto-aiming, so RPM will be set to idle (if shooter is on) later
-                targetShooterRPM = 0.0;
+                // Only set if not in active shoot sequence
+                if (!shootSequenceActive) {
+                    targetShooterRPM = 0.0;
+                }
             }
         } else {
-            // No tag detected - if auto-aim is enabled, reset target RPM
-            if (autoAimEnabled) {
+            // No tag detected - if auto-aim is enabled and not in shoot sequence, reset target RPM
+            if (autoAimEnabled && !shootSequenceActive) {
                 targetShooterRPM = 0.0;
             }
         }
@@ -557,14 +568,24 @@ public class Tele extends OpMode {
         // PID control for shooter RPM
         // Determine effective target RPM:
         // - If shooter is off: 0 RPM
-        // - If shooter is on but not auto-aiming at a tag: idle RPM
-        // - If shooter is on AND auto-aiming at a tag: full RPM from lookup table
+        // - If shoot sequence is active: use targetShooterRPM (set when sequence started)
+        // - If shooter is on but no active sequence and auto-aiming at a tag: use lookup RPM
+        // - If shooter is on but no active sequence and not auto-aiming: idle RPM
         double effectiveTargetRPM = 0.0;
         if (shooterSpeedOn) {
-            if (autoAimEnabled && tagDetected && targetShooterRPM > 0) {
+            if (shootSequenceActive && targetShooterRPM > 0) {
+                // During shoot sequence, use the target RPM set when sequence started
+                effectiveTargetRPM = targetShooterRPM;
+            } else if (autoAimEnabled && tagDetected && targetShooterRPM > 0) {
+                // Auto-aiming at tag, use lookup RPM
                 effectiveTargetRPM = targetShooterRPM;
             } else {
+                // Idle - use minimum RPM
                 effectiveTargetRPM = MIN_IDLE_SHOOTER_RPM;
+                // Update targetShooterRPM to reflect what we're actually using (for telemetry)
+                if (!shootSequenceActive) {
+                    targetShooterRPM = MIN_IDLE_SHOOTER_RPM;
+                }
             }
         }
 
@@ -768,20 +789,20 @@ public class Tele extends OpMode {
 
         if (manualBothTrapdoorsOverride) {
             // Both trapdoors open
-            leftTrapdoor.setPosition(0.0);  // Open
+            leftTrapdoor.setPosition(0.0);   // Open
             rightTrapdoor.setPosition(0.2);  // Open
         } else if (kickLeft) {
             // Left Trapdoor Open
-            leftTrapdoor.setPosition(0.0);  // Open
-            rightTrapdoor.setPosition(0.0);  // Closed
+            leftTrapdoor.setPosition(0.0);   // Open
+            rightTrapdoor.setPosition(0.1);  // Closed
         } else if (kickRight) {
             // Right Trapdoor Open
+            leftTrapdoor.setPosition(0.1);   // Closed
             rightTrapdoor.setPosition(0.2);  // Open
-            leftTrapdoor.setPosition(0.2);  // Closed
         } else {
             // No selection, ensure closed
-            leftTrapdoor.setPosition(0.2);  // Closed
-            rightTrapdoor.setPosition(0.0);  // Closed
+            leftTrapdoor.setPosition(0.1);   // Closed
+            rightTrapdoor.setPosition(0.1);  // Closed
         }
 
         // Set transfer to down (open) position for shooting
@@ -800,52 +821,23 @@ public class Tele extends OpMode {
         double rpmUpperBound = targetShooterRPM * (1.0 + RPM_TOLERANCE_PERCENT);
         boolean rpmReady = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
 
-        if (singleBallMode) {
-            // Single ball mode: intake stopped at start, resume after 300ms
-            if (shootSequenceTimer.milliseconds() < 300) {
-                intake.setPower(0.0);
-            } else {
-                // After 300ms, resume intake
-                if (shootSequenceTimer.milliseconds() < 900 + 300) {
-                    intake.setPower(-1.0);
-                } else if (shootSequenceTimer.milliseconds() < 1400 + 300) {
-                    intake.setPower(0.0);
-                } else {
-                    intake.setPower(-1.0);
-                }
-            }
-            // Do NOT activate kicker arms in single ball mode
-        } else {
-            // Normal mode: Intake runs for first 900ms, pauses 900-1400ms, then resumes until end
-            if (shootSequenceTimer.milliseconds() < 900) {
-                intake.setPower(-1.0);
-            } else if (shootSequenceTimer.milliseconds() < 1400) {
-                intake.setPower(0.0);
-            } else {
-                intake.setPower(-1.0);
-            }
-
-            // After 500ms delay, set the kicker arm position (only for the side with the ball)
-            if (shootSequenceTimer.milliseconds() >= 500) {
-                if (kickLeft) {
-                    leftKickerArm.setPosition(0.5);
-                }
-                if (kickRight) {
-                    rightKickerArm.setPosition(0.075);
-                }
-            }
-        }
+        intake.setPower(-1.0);
 
 // CONTINUOUS DISTANCE CHECK (Starts after 200ms to allow trapdoor movement)
         if (shootSequenceTimer.milliseconds() >= 200 && !distanceCheckPassed) {
             double distance = distanceSensor.getDistance(DistanceUnit.CM);
             if (distance < 20) { // Ball Detected
                 distanceCheckPassed = true;
-                if (!manualBothTrapdoorsOverride) {
-                    // Close both trapdoors
-                    leftTrapdoor.setPosition(0.2);  // Closed
-                    rightTrapdoor.setPosition(0.0);  // Closed
-                }
+                // Immediately move transfer UP (to bring ball to flywheel)
+                leftTransfer.setPosition(0.0);   // UP position
+                rightTransfer.setPosition(0.5);  // UP position
+                transfersUp = true;
+                // Close both trapdoors at the same time
+                leftTrapdoor.setPosition(0.1);   // Closed
+                rightTrapdoor.setPosition(0.1);  // Closed
+                leftTrapdoorOpen = false;
+                rightTrapdoorOpen = false;
+                bothTrapdoorsOpen = false;
             }
         }
 
@@ -856,22 +848,21 @@ public class Tele extends OpMode {
         }
 
         // IMMEDIATE FIRE TRIGGER
-        // If distance passed AND rpm is ready -> FIRE! (No 2000ms wait)
+        // Transfer is already UP when distance check passes. Shot fires automatically when RPM is ready.
         if (distanceCheckPassed && rpmReady && !shotFired) {
-            rightTransfer.setPosition(0.0);
-            leftTransfer.setPosition(0.5);
+            // Ball is already at flywheel (transfer UP), RPM is ready - shot is being fired!
             shotFired = true;
             shotFiredTimer.reset();
         }
 
         // End sequence 1 second after firing
         if (shotFired && shotFiredTimer.milliseconds() >= 1000) {
-            rightTrapdoor.setPosition(0.0);  // Closed
-            leftTrapdoor.setPosition(0.2);  // Closed
+            leftTrapdoor.setPosition(0.1);   // Closed
+            rightTrapdoor.setPosition(0.1);  // Closed
             leftKickerArm.setPosition(0.0);
             rightKickerArm.setPosition(0.5);
-            rightTransfer.setPosition(0.0);  // DOWN position
             leftTransfer.setPosition(0.5);   // DOWN position
+            rightTransfer.setPosition(0.0);  // DOWN position
 
             // shooter.setPower(0.0);
             // shooterSpeedOn = false;
@@ -906,10 +897,8 @@ public class Tele extends OpMode {
         manualBothTrapdoorsOverride = false;
 
         // Reset servos to closed positions
-        leftTrapdoor.setPosition(0.2);
-        rightTrapdoor.setPosition(0.0);
-        leftKickerArm.setPosition(0.0);
-        rightKickerArm.setPosition(0.5);
+        leftTrapdoor.setPosition(0.1);
+        rightTrapdoor.setPosition(0.1);
         rightTransfer.setPosition(0.0);  // DOWN position
         leftTransfer.setPosition(0.5);   // DOWN position
 
@@ -943,19 +932,19 @@ public class Tele extends OpMode {
         } else if (singleBallMode) {
             // Single ball mode: open only left trapdoor
             leftTrapdoor.setPosition(0.0);  // Open
-            rightTrapdoor.setPosition(0.0);  // Closed
+            rightTrapdoor.setPosition(0.1);  // Closed
         } else if (kickLeft) {
             // Left side only (prioritized when both match)
             leftTrapdoor.setPosition(0.0);  // Open
-            rightTrapdoor.setPosition(0.0);  // Closed
+            rightTrapdoor.setPosition(0.1);  // Closed
         } else if (kickRight) {
             // Right side
             rightTrapdoor.setPosition(0.2);  // Open
-            leftTrapdoor.setPosition(0.2);  // Closed
+            leftTrapdoor.setPosition(0.1);  // Closed
         } else {
             // No match (backup - use left side)
             leftTrapdoor.setPosition(0.0);  // Open
-            rightTrapdoor.setPosition(0.0);  // Closed
+            rightTrapdoor.setPosition(0.1);  // Closed
         }
 
         // Reset transfer positions (DOWN)
