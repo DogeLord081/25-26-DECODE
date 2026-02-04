@@ -14,10 +14,12 @@ import com.qualcomm.hardware.dfrobot.HuskyLens;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.DistanceSensor;
-import com.qualcomm.robotcore.hardware.ColorSensor;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
-import android.graphics.Color;
+import android.util.Size;
+import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
+import org.firstinspires.ftc.vision.VisionPortal;
+import org.firstinspires.ftc.teamcode.ColorDetectionTest.ColorRegionProcessor;
 
 @Autonomous(name = "DECODE 25-26 Auto")
 public class Auto extends OpMode {
@@ -39,19 +41,37 @@ public class Auto extends OpMode {
     private Servo leftHoodAdjustment;
     private Servo rightHoodAdjustment;
     private DistanceSensor distanceSensor;
-    private ColorSensor colorSensorLeft;
-    private ColorSensor colorSensorRight;
 
-    // Shooter constants
+    // Webcam color detection
+    private ColorRegionProcessor colorProcessor;
+    private VisionPortal visionPortal;
+
+    // Shooter constants (matching Tele.java PIDF)
     private static final double TARGET_RPM = 1900.0;
     private static final double RPM_TOLERANCE_PERCENT = 0.05;  // 5% tolerance
     private static final double SHOOTER_TICKS_PER_REV = 28.0;
+    private static final double MAX_SHOOTER_RPM = 4900.0;
+
+    // Shooter PIDF constants (from Tele.java)
+    private static final double SHOOTER_KP = 0.0015;
+    private static final double SHOOTER_KI = 0.00001;
+    private static final double SHOOTER_KD = 0.00001;
+    private static final double SHOOTER_KF = 1.0 / MAX_SHOOTER_RPM;
 
     // Shooter state tracking
     private double shooterRPM = 0.0;
     private int lastShooterEncoderPosition = 0;
     private ElapsedTime velocityTimer = new ElapsedTime();
     private ElapsedTime shootTimer = new ElapsedTime();
+
+    // PIDF state variables
+    private double shooterIntegral = 0.0;
+    private double shooterLastError = 0.0;
+    private ElapsedTime shooterPIDTimer = new ElapsedTime();
+
+    // Intake reversal state (for new shooting sequence)
+    private boolean intakeReversed = false;
+    private ElapsedTime intakeReversalTimer = new ElapsedTime();
 
     // Shooting sequence state
     private int currentBallIndex = 0;  // 0, 1, 2 for the three balls
@@ -231,8 +251,8 @@ public class Auto extends OpMode {
 
                 // JOLT LOGIC
                 if (currentBallIndex == 2 && !thirdBallJoltDone) {
-                    leftTrapdoor.setPosition(0.0);
-                    rightTrapdoor.setPosition(0.2);
+                    leftTrapdoor.setPosition(0.2);
+                    rightTrapdoor.setPosition(0.0);
                     // Start 500ms delay before performing the jolt
                     joltDelayTimer.reset();
                     joltNextState = 41; // After delay, go to Jolt Out state
@@ -357,8 +377,8 @@ public class Auto extends OpMode {
 
                 // JOLT LOGIC FOR ROUND 2
                 if (currentBallIndex == 2 && !thirdBallJoltDone) {
-                    leftTrapdoor.setPosition(0.0);
-                    rightTrapdoor.setPosition(0.2);
+                    leftTrapdoor.setPosition(0.2);
+                    rightTrapdoor.setPosition(0.0);
                     // Start 500ms delay before performing the jolt
                     joltDelayTimer.reset();
                     joltNextState = 101; // After delay, go to Jolt Out Round 2
@@ -426,13 +446,31 @@ public class Auto extends OpMode {
         }
     }
 
-    /** Simple proportional control for shooter RPM **/
+    /** Full PIDF control for shooter RPM (matching Tele.java) **/
     private void controlShooterPID() {
-        double error = TARGET_RPM - shooterRPM;
-        double kP = 0.0003;
-        double kF = 1.0 / 4900.0;  // Feedforward based on max RPM
+        double deltaTime = shooterPIDTimer.seconds();
+        shooterPIDTimer.reset();
 
-        double power = (TARGET_RPM * kF) + (error * kP);
+        // Prevent division by zero on first call
+        if (deltaTime <= 0) deltaTime = 0.02;
+
+        double error = TARGET_RPM - shooterRPM;
+
+        // Integral term with windup prevention
+        shooterIntegral += error * deltaTime;
+        shooterIntegral = Math.max(-1000, Math.min(1000, shooterIntegral));
+
+        // Derivative term
+        double derivative = (error - shooterLastError) / deltaTime;
+        shooterLastError = error;
+
+        // PIDF calculation
+        double feedforward = TARGET_RPM * SHOOTER_KF;
+        double pTerm = error * SHOOTER_KP;
+        double iTerm = shooterIntegral * SHOOTER_KI;
+        double dTerm = derivative * SHOOTER_KD;
+
+        double power = feedforward + pTerm + iTerm + dTerm;
         power = Math.max(0.0, Math.min(1.0, power));
         shooter.setPower(power);
     }
@@ -465,18 +503,17 @@ public class Auto extends OpMode {
                 // Third ball - will use both trapdoors regardless
                 currentShootLeft = true;
             } else if (useSensors) {
-                // *** COLOR SENSOR LOGIC ENABLED ***
-                float[] hsvLeft = new float[3];
-                Color.RGBToHSV(colorSensorLeft.red(), colorSensorLeft.green(), colorSensorLeft.blue(), hsvLeft);
-                // Simple threshold: > 175 is typically Purple/Blue-ish, < 150 is Green/Yellow-ish
-                boolean leftIsPurple = hsvLeft[0] > 175;
+                // *** WEBCAM COLOR DETECTION LOGIC ***
+                ColorRegionProcessor.AnalysisResult colorResult = colorProcessor.getAnalysis();
+                String leftColor = colorResult.leftColor;
+                String rightColor = colorResult.rightColor;
 
                 if (targetColor == 'P') {
                     // We need Purple. If Left is Purple, shoot Left. Else shoot Right.
-                    currentShootLeft = leftIsPurple;
+                    currentShootLeft = leftColor.equals("PURPLE");
                 } else {
-                    // We need Green. If Left is NOT Purple (Green), shoot Left. Else shoot Right.
-                    currentShootLeft = !leftIsPurple;
+                    // We need Green. If Left is Green, shoot Left. Else shoot Right.
+                    currentShootLeft = leftColor.equals("GREEN");
                 }
             } else {
                 // Standard Round 1 Logic (Assumption based on AprilTag pattern)
@@ -513,14 +550,14 @@ public class Auto extends OpMode {
             // Open appropriate trapdoor throughout loading phase
             if (!distanceCheckPassed) {
                 if (isThirdBall) {
-                    leftTrapdoor.setPosition(0.0);
-                    rightTrapdoor.setPosition(0.2);
-                } else if (currentShootLeft) {
-                    leftTrapdoor.setPosition(0.0);
-                    rightTrapdoor.setPosition(0.0);
-                } else {
                     leftTrapdoor.setPosition(0.2);
-                    rightTrapdoor.setPosition(0.2);
+                    rightTrapdoor.setPosition(0.0);
+                } else if (currentShootLeft) {
+                    leftTrapdoor.setPosition(0.2);
+                    rightTrapdoor.setPosition(0.1);
+                } else {
+                    leftTrapdoor.setPosition(0.1);
+                    rightTrapdoor.setPosition(0.0);
                 }
             }
 
@@ -553,17 +590,29 @@ public class Auto extends OpMode {
                     return;
                 } else {
                     distanceCheckPassed = true;
+                    // Move transfer UP (to bring ball to flywheel)
+                    leftTransfer.setPosition(0.0);   // UP position
+                    rightTransfer.setPosition(0.5);  // UP position
+                    // Spin intake forward to push ball up
+                    intake.setPower(1.0);
+                    intakeReversed = false;
+                    intakeReversalTimer.reset();
+                    // Close both trapdoors immediately
                     leftTrapdoor.setPosition(0.1);
                     rightTrapdoor.setPosition(0.1);
-                    intake.setPower(0);
                 }
             }
 
-            // Fire if ready
-            if (elapsedMs >= 2000 && distanceCheckPassed && !shotFired) {
+            // After 50ms, set intake back to -1.0
+            if (distanceCheckPassed && !intakeReversed && intakeReversalTimer.milliseconds() >= 50) {
+                intake.setPower(-1.0);
+                intakeReversed = true;
+            }
+
+            // Fire if ready (transfer is already UP when distance check passes)
+            if (distanceCheckPassed && intakeReversed && !shotFired) {
                 if (isRPMReady()) {
-                    leftTransfer.setPosition(0.5);
-                    rightTransfer.setPosition(0.0);
+                    // Ball is already at flywheel (transfer UP), RPM is ready - shot is being fired!
                     shotFired = true;
                     shotFiredTimer.reset();
                 }
@@ -571,10 +620,8 @@ public class Auto extends OpMode {
         }
 
         // Keep checking RPM if waiting to fire
-        if (distanceCheckPassed && !shotFired) {
+        if (distanceCheckPassed && intakeReversed && !shotFired) {
             if (isRPMReady()) {
-                leftTransfer.setPosition(0.5);
-                rightTransfer.setPosition(0.0);
                 shotFired = true;
                 shotFiredTimer.reset();
             }
@@ -582,8 +629,8 @@ public class Auto extends OpMode {
 
         // Reset after shot
         if (shotFired && shotFiredTimer.seconds() >= 1.0) {
-            leftTransfer.setPosition(0.0);
-            rightTransfer.setPosition(0.5);
+            leftTransfer.setPosition(0.5);   // DOWN position
+            rightTransfer.setPosition(0.0);  // DOWN position
             leftKickerArm.setPosition(0.0);
             rightKickerArm.setPosition(0.5);
             leftTrapdoor.setPosition(0.1);
@@ -592,6 +639,7 @@ public class Auto extends OpMode {
             currentBallIndex++;
             shotFired = false;
             distanceCheckPassed = false;
+            intakeReversed = false;
             firstBallPreloaded = false;
             shootSideDecided = false;
             thirdBallJoltDone = false; // Reset for safety (though logic prevents reuse in same round)
@@ -604,17 +652,18 @@ public class Auto extends OpMode {
         shootTimer.reset();
         distanceCheckPassed = false;
         shotFired = false;
+        intakeReversed = false;
 
         if (shootLeft) {
-            leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.0);
+            leftTrapdoor.setPosition(0.2);   // Open
+            rightTrapdoor.setPosition(0.1);  // Closed
         } else {
-            leftTrapdoor.setPosition(0.2);
-            rightTrapdoor.setPosition(0.2);
+            leftTrapdoor.setPosition(0.1);   // Closed
+            rightTrapdoor.setPosition(0.0);  // Open
         }
 
-        leftTransfer.setPosition(0.0);
-        rightTransfer.setPosition(0.5);
+        leftTransfer.setPosition(0.5);   // DOWN position
+        rightTransfer.setPosition(0.0);  // DOWN position
         leftKickerArm.setPosition(0.0);
         rightKickerArm.setPosition(0.5);
     }
@@ -634,11 +683,11 @@ public class Auto extends OpMode {
         double elapsedMs = shootTimer.seconds() * 1000;
 
         if (currentShootLeft) {
-            leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.0);
+            leftTrapdoor.setPosition(0.2);   // Open
+            rightTrapdoor.setPosition(0.1);  // Closed
         } else {
-            leftTrapdoor.setPosition(0.2);
-            rightTrapdoor.setPosition(0.2);
+            leftTrapdoor.setPosition(0.1);   // Closed
+            rightTrapdoor.setPosition(0.0);  // Open
         }
 
         if (elapsedMs < 900) {
@@ -663,9 +712,16 @@ public class Auto extends OpMode {
                 restartBallSequence(currentShootLeft);
             } else {
                 distanceCheckPassed = true;
+                // Move transfer UP (to bring ball to flywheel)
+                leftTransfer.setPosition(0.0);   // UP position
+                rightTransfer.setPosition(0.5);  // UP position
+                // Spin intake forward to push ball up
+                intake.setPower(1.0);
+                intakeReversed = false;
+                intakeReversalTimer.reset();
+                // Close both trapdoors immediately
                 leftTrapdoor.setPosition(0.1);
                 rightTrapdoor.setPosition(0.1);
-                intake.setPower(0);
             }
         }
     }
@@ -718,22 +774,10 @@ public class Auto extends OpMode {
             telemetry.addData("Target Color", currentBallIndex < 3 ? (ballOrder[currentBallIndex] == 'P' ? "PURPLE" : "GREEN") : "Done");
             telemetry.addData("Jolting", (pathState == 41 || pathState == 42 || pathState == 101 || pathState == 102) ? "YES" : "NO");
 
-            // Show color sensor readings
-            float[] leftHSV = new float[3];
-            float[] rightHSV = new float[3];
-            Color.RGBToHSV(colorSensorLeft.red(), colorSensorLeft.green(), colorSensorLeft.blue(), leftHSV);
-            Color.RGBToHSV(colorSensorRight.red(), colorSensorRight.green(), colorSensorRight.blue(), rightHSV);
-
-            // Show proximity readings
-            double leftProximity = ((DistanceSensor) colorSensorLeft).getDistance(DistanceUnit.CM);
-            double rightProximity = ((DistanceSensor) colorSensorRight).getDistance(DistanceUnit.CM);
-
-            telemetry.addData("Left Sensor", (leftHSV[0] > 175 ? "PURPLE" : "GREEN") +
-                    " (prox: " + String.format("%.1f", leftProximity) + "cm" +
-                    (leftProximity < 6.5 ? " BALL" : "") + ")");
-            telemetry.addData("Right Sensor", (rightHSV[0] > 175 ? "PURPLE" : "GREEN") +
-                    " (prox: " + String.format("%.1f", rightProximity) + "cm" +
-                    (rightProximity < 6.5 ? " BALL" : "") + ")");
+            // Show webcam color detection readings
+            ColorRegionProcessor.AnalysisResult colorResult = colorProcessor.getAnalysis();
+            telemetry.addData("Left Color (Webcam)", colorResult.leftColor);
+            telemetry.addData("Right Color (Webcam)", colorResult.rightColor);
 
             // Show transfer distance sensor
             double transferDistance = distanceSensor.getDistance(DistanceUnit.CM);
@@ -790,9 +834,15 @@ public class Auto extends OpMode {
         // Initialize distance sensor
         distanceSensor = hardwareMap.get(DistanceSensor.class, "distanceSensor");
 
-        // Initialize color sensors
-        colorSensorLeft = hardwareMap.get(ColorSensor.class, "colorSensorLeft");
-        colorSensorRight = hardwareMap.get(ColorSensor.class, "colorSensorRight");
+        // Initialize webcam color detection
+        colorProcessor = new ColorRegionProcessor();
+        visionPortal = new VisionPortal.Builder()
+                .setCamera(hardwareMap.get(WebcamName.class, "Webcam 1"))
+                .setCameraResolution(new Size(640, 480))
+                .addProcessor(colorProcessor)
+                .enableLiveView(true)
+                .setStreamFormat(VisionPortal.StreamFormat.MJPEG)
+                .build();
 
         // Set initial servo positions (closed/neutral)
         leftTrapdoor.setPosition(0.1);
