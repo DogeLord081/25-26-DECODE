@@ -523,17 +523,43 @@ public class Tele extends OpMode {
         lastDpadRightState = gamepad2.dpad_right;
 
         // --- Bumpers: Color Selection ---
-        // Left Bumper: Select PURPLE color
+        // Left Bumper: Select PURPLE color and start auto shoot sequence
         if (gamepad2.left_bumper && !lastGamepad2LeftBumperState) {
             colorPurpleSelected = true;
             colorGreenSelected = false;
+            // Start shoot sequence if not already active
+            if (!shootSequenceActive) {
+                if (!tagDetected || !autoAimEnabled) {
+                    // Tag not detected or auto-aim disabled - use default values
+                    leftHoodPosition = 0.3;
+                    leftHoodAdjustment.setPosition(leftHoodPosition);
+                    double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
+                    rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
+                    rightHoodAdjustment.setPosition(rightHoodPosition);
+                    targetShooterRPM = 2000.0;
+                }
+                startShootSequence();
+            }
         }
         lastGamepad2LeftBumperState = gamepad2.left_bumper;
 
-        // Right Bumper: Select GREEN color
+        // Right Bumper: Select GREEN color and start auto shoot sequence
         if (gamepad2.right_bumper && !lastGamepad2RightBumperState) {
             colorGreenSelected = true;
             colorPurpleSelected = false;
+            // Start shoot sequence if not already active
+            if (!shootSequenceActive) {
+                if (!tagDetected || !autoAimEnabled) {
+                    // Tag not detected or auto-aim disabled - use default values
+                    leftHoodPosition = 0.3;
+                    leftHoodAdjustment.setPosition(leftHoodPosition);
+                    double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
+                    rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
+                    rightHoodAdjustment.setPosition(rightHoodPosition);
+                    targetShooterRPM = 2000.0;
+                }
+                startShootSequence();
+            }
         }
         lastGamepad2RightBumperState = gamepad2.right_bumper;
 
@@ -623,32 +649,17 @@ public class Tele extends OpMode {
         double rpmUpperBound = targetShooterRPM * (1.0 + RPM_TOLERANCE_PERCENT);
         boolean rpmInRange = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
 
-        // Right Trigger: Auto-shoot sequence
-        // Starts if a color is selected. Uses tag data if available, otherwise uses fallback defaults.
+        // Right Trigger: Stop auto-shoot sequence (bumpers now start the sequence)
         boolean rightTriggerPressed = gamepad2.right_trigger > 0.5;
         if (rightTriggerPressed && !lastGamepad2RightTriggerState) {
             if (shootSequenceActive) {
                 // If sequence is active, stop it
                 stopShootSequence();
-            } else if (colorPurpleSelected || colorGreenSelected) {
-                // Color is selected - start shoot sequence
-                if (!tagDetected || !autoAimEnabled) {
-                    // Tag not detected or auto-aim disabled - use default values
-                    // Set default hood position (0.3 left) and RPM (2000)
-                    leftHoodPosition = 0.3;
-                    leftHoodAdjustment.setPosition(leftHoodPosition);
-                    double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
-                    rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
-                    rightHoodAdjustment.setPosition(rightHoodPosition);
-                    targetShooterRPM = 2000.0;
-                }
-                // If tag detected and auto-aim enabled, use lookup table values (already set by AprilTag detection code)
-                startShootSequence();
             }
         }
         lastGamepad2RightTriggerState = rightTriggerPressed;
 
-        // No auto-start - shoot sequence only starts when right trigger is pressed with conditions met
+        // Shoot sequence starts automatically when bumpers are pressed to select color
 
         if (shootSequenceActive) {
             executeShootSequence();
@@ -883,7 +894,7 @@ public class Tele extends OpMode {
         }
 
         // End sequence 1 second after firing
-        if (shotFired && shotFiredTimer.milliseconds() >= 1000) {
+        if (shotFired && shotFiredTimer.milliseconds() >= 750) {
             leftTrapdoor.setPosition(0.1);   // Closed
             rightTrapdoor.setPosition(0.1);  // Closed
             leftKickerArm.setPosition(0.0);
