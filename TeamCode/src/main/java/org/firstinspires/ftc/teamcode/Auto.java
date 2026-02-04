@@ -72,6 +72,15 @@ public class Auto extends OpMode {
     // Intake reversal state (for new shooting sequence)
     private boolean intakeReversed = false;
     private ElapsedTime intakeReversalTimer = new ElapsedTime();
+    private ElapsedTime transferTimer = new ElapsedTime();
+    private boolean transfersUp = false;
+
+    // Intake pulse timer for -1/0 pattern (250ms each)
+    private ElapsedTime intakePulseTimer = new ElapsedTime();
+
+    // Restart intake pulse state
+    private boolean restartIntakePulseActive = false;
+    private ElapsedTime restartIntakePulseTimer = new ElapsedTime();
 
     // Shooting sequence state
     private int currentBallIndex = 0;  // 0, 1, 2 for the three balls
@@ -81,6 +90,15 @@ public class Auto extends OpMode {
     private ElapsedTime shotFiredTimer = new ElapsedTime();  // Track time since shot was fired
     private boolean currentShootLeft = false;  // Cached value for which side to shoot from
     private boolean shootSideDecided = false;  // Track if we've decided which side to shoot from
+    private boolean kickLeft = false;  // Track if we're kicking from left side
+    private boolean kickRight = false;  // Track if we're kicking from right side
+    private boolean singleBallMode = false;  // Track if in single ball mode
+    private boolean trapdoorsOpenedForSingleBall = false;  // Track trapdoor state
+    private boolean leftTrapdoorOpen = false;
+    private boolean rightTrapdoorOpen = false;
+    private boolean bothTrapdoorsOpen = false;
+    private boolean leftKickerArmOpen = false;
+    private boolean rightKickerArmOpen = false;
 
     // *** NEW VARIABLE FOR JOLT LOGIC ***
     private boolean thirdBallJoltDone = false;
@@ -498,10 +516,13 @@ public class Auto extends OpMode {
         // Determine which side to shoot from
         if (!shootSideDecided) {
             char targetColor = ballOrder[currentBallIndex];
+            boolean isThirdBall = (currentBallIndex == 2);
 
-            if (currentBallIndex == 2) {
+            if (isThirdBall) {
                 // Third ball - will use both trapdoors regardless
                 currentShootLeft = true;
+                kickLeft = true;
+                kickRight = true;
             } else if (useSensors) {
                 // *** WEBCAM COLOR DETECTION LOGIC ***
                 ColorRegionProcessor.AnalysisResult colorResult = colorProcessor.getAnalysis();
@@ -515,132 +536,121 @@ public class Auto extends OpMode {
                     // We need Green. If Left is Green, shoot Left. Else shoot Right.
                     currentShootLeft = leftColor.equals("GREEN");
                 }
+                kickLeft = currentShootLeft;
+                kickRight = !currentShootLeft;
             } else {
                 // Standard Round 1 Logic (Assumption based on AprilTag pattern)
                 currentShootLeft = (targetColor == 'P');
+                kickLeft = currentShootLeft;
+                kickRight = !currentShootLeft;
             }
             shootSideDecided = true;
-        }
+            intakePulseTimer.reset();
 
-        double elapsedMs = shootTimer.seconds() * 1000;  // Convert to milliseconds
-        boolean isThirdBall = (currentBallIndex == 2);
-
-        // QUICK-FIRE: If Round 2 and we already preloaded the first ball during the return trip,
-        // allow an expedited fire without going through the full loading timing.
-        // Transfer is already UP from preloading, just mark shot as fired when RPM ready
-        if (useSensors && currentBallIndex == 0 && firstBallPreloaded && distanceCheckPassed && !shotFired) {
-            if (elapsedMs >= 500 && isRPMReady()) {
-                // Transfer already UP, ball is firing
-                shotFired = true;
-                shotFiredTimer.reset();
-            }
-        }
-
-        // Pre-load logic only applies to Round 1 (useSensors == false)
-        // Transfer is already UP from preloading, just mark shot as fired when RPM ready
-        if (!useSensors && currentBallIndex == 0 && firstBallPreloaded && distanceCheckPassed && !shotFired) {
-            if (elapsedMs >= 500 && shooterRPM >= TARGET_RPM) {
-                // Transfer already UP, ball is firing
-                shotFired = true;
-                shotFiredTimer.reset();
-            }
-        } else if (!shotFired) {
-            // Normal loading sequence (Used for Round 1 balls 2&3, and ALL Round 2 balls)
-
-            // Open appropriate trapdoor throughout loading phase
-            // Note: Physical trapdoors are swapped - "left" trapdoor controls right side ball
-            if (!distanceCheckPassed) {
-                if (isThirdBall) {
-                    leftTrapdoor.setPosition(0.2);   // Open left (right physical)
-                    rightTrapdoor.setPosition(0.0);  // Open right (left physical)
-                } else if (currentShootLeft) {
-                    // Ball is on LEFT side, open RIGHT trapdoor (left physical)
-                    leftTrapdoor.setPosition(0.1);   // Closed
-                    rightTrapdoor.setPosition(0.0);  // Open
-                } else {
-                    // Ball is on RIGHT side, open LEFT trapdoor (right physical)
-                    leftTrapdoor.setPosition(0.2);   // Open
-                    rightTrapdoor.setPosition(0.1);  // Closed
-                }
-            }
-
-            // Intake pulsing
-            if (elapsedMs < 900) {
-                intake.setPower(-1.0);
-            } else if (elapsedMs < 1400) {
-                intake.setPower(0.0);
+            // Open appropriate trapdoor and kicker arm at sequence start
+            boolean isBothKick = kickLeft && kickRight;
+            if (isBothKick) {
+                leftTrapdoor.setPosition(0.2);   // Open (right physical)
+                rightTrapdoor.setPosition(0.0);  // Open (left physical)
+                leftKickerArm.setPosition(0.5);
+                rightKickerArm.setPosition(0.075);
+                bothTrapdoorsOpen = true;
+            } else if (kickLeft) {
+                // Ball is on LEFT side, open RIGHT trapdoor (left physical)
+                leftTrapdoor.setPosition(0.1);   // Closed
+                rightTrapdoor.setPosition(0.0);  // Open
+                rightKickerArm.setPosition(0.075);
+                leftTrapdoorOpen = false;
+                rightTrapdoorOpen = true;
             } else {
-                intake.setPower(-1.0);
-            }
-
-            // Kicker arm activation
-            // Note: Physical kicker arms are swapped - "left" kicker controls right side ball
-            if (elapsedMs >= 500) {
-                if (isThirdBall) {
-                    leftKickerArm.setPosition(0.5);
-                    rightKickerArm.setPosition(0.075);
-                } else if (currentShootLeft) {
-                    // Ball is on LEFT side, use RIGHT kicker (left physical)
-                    rightKickerArm.setPosition(0.075);
-                } else {
-                    // Ball is on RIGHT side, use LEFT kicker (right physical)
-                    leftKickerArm.setPosition(0.5);
-                }
-            }
-
-            // Distance Check
-            if (elapsedMs >= 1500 && !distanceCheckPassed) {
-                double distance = distanceSensor.getDistance(DistanceUnit.CM);
-                if (distance > 20) {
-                    restartBallSequence(currentShootLeft);
-                    return;
-                } else {
-                    distanceCheckPassed = true;
-                    // Move transfer UP (to bring ball to flywheel)
-                    leftTransfer.setPosition(0.0);   // UP position
-                    rightTransfer.setPosition(0.5);  // UP position
-                    // Spin intake forward to push ball up
-                    intake.setPower(1.0);
-                    intakeReversed = false;
-                    intakeReversalTimer.reset();
-                    // Close both trapdoors immediately
-                    leftTrapdoor.setPosition(0.1);
-                    rightTrapdoor.setPosition(0.1);
-                }
-            }
-
-            // After 50ms, set intake back to -1.0
-            if (distanceCheckPassed && !intakeReversed && intakeReversalTimer.milliseconds() >= 50) {
-                intake.setPower(-1.0);
-                intakeReversed = true;
-            }
-
-            // Fire if ready (transfer is already UP when distance check passes)
-            if (distanceCheckPassed && intakeReversed && !shotFired) {
-                if (isRPMReady()) {
-                    // Ball is already at flywheel (transfer UP), RPM is ready - shot is being fired!
-                    shotFired = true;
-                    shotFiredTimer.reset();
-                }
+                // Ball is on RIGHT side, open LEFT trapdoor (right physical)
+                leftTrapdoor.setPosition(0.2);   // Open
+                rightTrapdoor.setPosition(0.1);  // Closed
+                leftKickerArm.setPosition(0.5);
+                leftTrapdoorOpen = true;
+                rightTrapdoorOpen = false;
             }
         }
 
-        // Keep checking RPM if waiting to fire
-        if (distanceCheckPassed && intakeReversed && !shotFired) {
-            if (isRPMReady()) {
-                shotFired = true;
-                shotFiredTimer.reset();
+        // Handle restart intake pulse completion (after 150ms, set intake back to -1.0 and transfers down)
+        if (restartIntakePulseActive && restartIntakePulseTimer.milliseconds() >= 150) {
+            intake.setPower(-1.0);
+            restartIntakePulseActive = false;
+            // Now set transfer positions (DOWN)
+            leftTransfer.setPosition(0.5);
+            rightTransfer.setPosition(0.0);
+            transfersUp = false;
+        }
+
+        // Pulse intake while waiting for distance check: -1 for 250ms, 0 for 250ms
+        if (!restartIntakePulseActive && !distanceCheckPassed) {
+            long pulsePhase = (long) intakePulseTimer.milliseconds() % 500;
+            if (pulsePhase < 250) {
+                intake.setPower(-1.0);  // Intake on for first 250ms
+            } else {
+                intake.setPower(0.0);   // Intake off for next 250ms
             }
         }
 
-        // Reset after shot
-        if (shotFired && shotFiredTimer.seconds() >= 1.0) {
-            leftTransfer.setPosition(0.5);   // DOWN position
-            rightTransfer.setPosition(0.0);  // DOWN position
+        // CONTINUOUS DISTANCE CHECK (Starts after 200ms to allow trapdoor movement)
+        if (shootTimer.milliseconds() >= 200 && !distanceCheckPassed) {
+            double distance = distanceSensor.getDistance(DistanceUnit.CM);
+            if (distance < 20) { // Ball Detected
+                distanceCheckPassed = true;
+                // Immediately move transfer UP (to bring ball to flywheel)
+                leftTransfer.setPosition(0.0);   // UP position
+                rightTransfer.setPosition(0.5);  // UP position
+                transfersUp = true;
+
+                // Keep intake at -1 to push ball up
+                intake.setPower(-1.0);
+                intakeReversed = false;
+                transferTimer.reset();  // Start timer for intake reversal
+
+                // Close both trapdoors immediately
+                leftTrapdoor.setPosition(0.1);   // Closed
+                rightTrapdoor.setPosition(0.1);  // Closed
+                leftTrapdoorOpen = false;
+                rightTrapdoorOpen = false;
+                bothTrapdoorsOpen = false;
+            }
+        }
+
+        // After 50ms, set intake back to -1.0
+        if (distanceCheckPassed && !intakeReversed && transferTimer.milliseconds() >= 50) {
+            intake.setPower(-1.0);
+            intakeReversed = true;
+        }
+
+        // TIMEOUT SAFETY (1.5 seconds)
+        if (shootTimer.milliseconds() >= 1500 && !distanceCheckPassed) {
+            restartBallSequence(currentShootLeft);
+            return;
+        }
+
+        // IMMEDIATE FIRE TRIGGER
+        // Transfer is already UP when distance check passes. Shot fires automatically when RPM is ready.
+        if (distanceCheckPassed && isRPMReady() && !shotFired) {
+            // Ball is already at flywheel (transfer UP), RPM is ready - shot is being fired!
+            shotFired = true;
+            shotFiredTimer.reset();
+        }
+
+        // End sequence 750ms after firing
+        if (shotFired && shotFiredTimer.milliseconds() >= 750) {
+            leftTrapdoor.setPosition(0.1);   // Closed
+            rightTrapdoor.setPosition(0.1);  // Closed
             leftKickerArm.setPosition(0.0);
             rightKickerArm.setPosition(0.5);
-            leftTrapdoor.setPosition(0.1);
-            rightTrapdoor.setPosition(0.1);
+            leftTransfer.setPosition(0.5);   // DOWN position
+            rightTransfer.setPosition(0.0);  // DOWN position
+
+            leftTrapdoorOpen = false;
+            rightTrapdoorOpen = false;
+            bothTrapdoorsOpen = false;
+            leftKickerArmOpen = false;
+            rightKickerArmOpen = false;
+            transfersUp = false;
 
             currentBallIndex++;
             shotFired = false;
@@ -648,6 +658,11 @@ public class Auto extends OpMode {
             intakeReversed = false;
             firstBallPreloaded = false;
             shootSideDecided = false;
+            restartIntakePulseActive = false;
+            kickLeft = false;
+            kickRight = false;
+            singleBallMode = false;
+            trapdoorsOpenedForSingleBall = false;
             thirdBallJoltDone = false; // Reset for safety (though logic prevents reuse in same round)
             shootTimer.reset();
         }
@@ -655,24 +670,43 @@ public class Auto extends OpMode {
 
     /** Restart the sequence for the current ball when distance sensor doesn't detect ball **/
     private void restartBallSequence(boolean shootLeft) {
+        // Reset the timer to restart the cycle from the beginning
         shootTimer.reset();
         distanceCheckPassed = false;
         shotFired = false;
         intakeReversed = false;
 
-        // Physical trapdoors are swapped
-        if (shootLeft) {
-            // Ball is on LEFT side, open RIGHT trapdoor (left physical)
-            leftTrapdoor.setPosition(0.1);   // Closed
+        // Do NOT re-read color sensors - keep using the same kickLeft/kickRight values
+        // that were originally determined until the ball passes the distance sensor check
+
+        // Check if both sides should be kicked (both trapdoors open)
+        if (kickLeft && kickRight) {
+            leftTrapdoor.setPosition(0.2);  // Open
             rightTrapdoor.setPosition(0.0);  // Open
-        } else {
-            // Ball is on RIGHT side, open LEFT trapdoor (right physical)
-            leftTrapdoor.setPosition(0.2);   // Open
+        } else if (singleBallMode) {
+            // Single ball mode: open only left trapdoor
+            leftTrapdoor.setPosition(0.2);  // Open
             rightTrapdoor.setPosition(0.1);  // Closed
+        } else if (kickLeft) {
+            // Left side only (prioritized when both match)
+            leftTrapdoor.setPosition(0.1);  // Closed
+            rightTrapdoor.setPosition(0.0);  // Open
+        } else if (kickRight) {
+            // Right side
+            leftTrapdoor.setPosition(0.2);  // Open
+            rightTrapdoor.setPosition(0.1);  // Closed
+        } else {
+            // No match (backup - use left side)
+            leftTrapdoor.setPosition(0.1);  // Closed
+            rightTrapdoor.setPosition(0.0);  // Open
         }
 
-        leftTransfer.setPosition(0.5);   // DOWN position
-        rightTransfer.setPosition(0.0);  // DOWN position
+        // Start intake pulse - spin forward to help ball drop
+        intake.setPower(-1.0);
+        restartIntakePulseActive = true;
+        restartIntakePulseTimer.reset();
+
+        // Reset kicker arms
         leftKickerArm.setPosition(0.0);
         rightKickerArm.setPosition(0.5);
     }
@@ -730,8 +764,8 @@ public class Auto extends OpMode {
                 // Move transfer UP (to bring ball to flywheel)
                 leftTransfer.setPosition(0.0);   // UP position
                 rightTransfer.setPosition(0.5);  // UP position
-                // Spin intake forward to push ball up
-                intake.setPower(1.0);
+                // Keep intake at -1 to push ball up
+                intake.setPower(-1.0);
                 intakeReversed = false;
                 intakeReversalTimer.reset();
                 // Close both trapdoors immediately

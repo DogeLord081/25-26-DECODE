@@ -902,9 +902,6 @@ public class Tele extends OpMode {
             leftTransfer.setPosition(0.5);   // DOWN position
             rightTransfer.setPosition(0.0);  // DOWN position
 
-            // shooter.setPower(0.0);
-            // shooterSpeedOn = false;
-
             leftTrapdoorOpen = false;
             rightTrapdoorOpen = false;
             bothTrapdoorsOpen = false;
