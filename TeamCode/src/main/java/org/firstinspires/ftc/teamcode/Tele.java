@@ -169,6 +169,7 @@ public class Tele extends OpMode {
     private boolean intakeReversed = false; // Tracks if intake was reversed after distance check
     private boolean restartIntakePulseActive = false; // Tracks if restart intake pulse is in progress
     private ElapsedTime restartIntakePulseTimer = new ElapsedTime(); // Timer for restart intake pulse
+    private ElapsedTime intakePulseTimer = new ElapsedTime(); // Timer for intake pulsing during shoot sequence
     private boolean kickLeft = false; // Track if left side should be kicked
     private boolean kickRight = false; // Track if right side should be kicked
     private boolean singleBallMode = false; // True if proximity > 6.5 (only one ball)
@@ -735,6 +736,7 @@ public class Tele extends OpMode {
     private void startShootSequence() {
         shootSequenceActive = true;
         shootSequenceTimer.reset();
+        intakePulseTimer.reset();
         shotFired = false;
         intakeReversed = false;
 
@@ -826,9 +828,14 @@ public class Tele extends OpMode {
             transfersUp = false;
         }
 
-        // Only set intake to -1.0 if not in restart pulse mode
-        if (!restartIntakePulseActive) {
-            intake.setPower(-1.0);
+        // Pulse intake while waiting for distance check: -1 for 250ms, 0 for 250ms
+        if (!restartIntakePulseActive && !distanceCheckPassed) {
+            long pulsePhase = (long) intakePulseTimer.milliseconds() % 500;
+            if (pulsePhase < 250) {
+                intake.setPower(-1.0);  // Intake on for first 250ms
+            } else {
+                intake.setPower(0.0);   // Intake off for next 250ms
+            }
         }
 
 // CONTINUOUS DISTANCE CHECK (Starts after 200ms to allow trapdoor movement)
@@ -842,7 +849,7 @@ public class Tele extends OpMode {
                 transfersUp = true;
 
                 // Spin intake forward to push ball up
-                intake.setPower(1.0);
+                intake.setPower(-1.0);
                 intakeReversed = false;
                 transferTimer.reset();  // Start timer for intake reversal
 
@@ -971,7 +978,7 @@ public class Tele extends OpMode {
         }
 
         // Start intake pulse - spin forward to help ball drop
-        intake.setPower(1.0);
+        intake.setPower(-1.0);
         restartIntakePulseActive = true;
         restartIntakePulseTimer.reset();
 

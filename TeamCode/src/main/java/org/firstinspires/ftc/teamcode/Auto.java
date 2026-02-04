@@ -251,8 +251,8 @@ public class Auto extends OpMode {
 
                 // JOLT LOGIC
                 if (currentBallIndex == 2 && !thirdBallJoltDone) {
-                    leftTrapdoor.setPosition(0.2);
-                    rightTrapdoor.setPosition(0.0);
+                    leftTrapdoor.setPosition(0.2);   // Open (right physical)
+                    rightTrapdoor.setPosition(0.0);  // Open (left physical)
                     // Start 500ms delay before performing the jolt
                     joltDelayTimer.reset();
                     joltNextState = 41; // After delay, go to Jolt Out state
@@ -377,8 +377,8 @@ public class Auto extends OpMode {
 
                 // JOLT LOGIC FOR ROUND 2
                 if (currentBallIndex == 2 && !thirdBallJoltDone) {
-                    leftTrapdoor.setPosition(0.2);
-                    rightTrapdoor.setPosition(0.0);
+                    leftTrapdoor.setPosition(0.2);   // Open (right physical)
+                    rightTrapdoor.setPosition(0.0);  // Open (left physical)
                     // Start 500ms delay before performing the jolt
                     joltDelayTimer.reset();
                     joltNextState = 101; // After delay, go to Jolt Out Round 2
@@ -527,20 +527,20 @@ public class Auto extends OpMode {
 
         // QUICK-FIRE: If Round 2 and we already preloaded the first ball during the return trip,
         // allow an expedited fire without going through the full loading timing.
+        // Transfer is already UP from preloading, just mark shot as fired when RPM ready
         if (useSensors && currentBallIndex == 0 && firstBallPreloaded && distanceCheckPassed && !shotFired) {
             if (elapsedMs >= 500 && isRPMReady()) {
-                leftTransfer.setPosition(0.5);
-                rightTransfer.setPosition(0.0);
+                // Transfer already UP, ball is firing
                 shotFired = true;
                 shotFiredTimer.reset();
             }
         }
 
         // Pre-load logic only applies to Round 1 (useSensors == false)
+        // Transfer is already UP from preloading, just mark shot as fired when RPM ready
         if (!useSensors && currentBallIndex == 0 && firstBallPreloaded && distanceCheckPassed && !shotFired) {
             if (elapsedMs >= 500 && shooterRPM >= TARGET_RPM) {
-                leftTransfer.setPosition(0.5);
-                rightTransfer.setPosition(0.0);
+                // Transfer already UP, ball is firing
                 shotFired = true;
                 shotFiredTimer.reset();
             }
@@ -548,16 +548,19 @@ public class Auto extends OpMode {
             // Normal loading sequence (Used for Round 1 balls 2&3, and ALL Round 2 balls)
 
             // Open appropriate trapdoor throughout loading phase
+            // Note: Physical trapdoors are swapped - "left" trapdoor controls right side ball
             if (!distanceCheckPassed) {
                 if (isThirdBall) {
-                    leftTrapdoor.setPosition(0.2);
-                    rightTrapdoor.setPosition(0.0);
+                    leftTrapdoor.setPosition(0.2);   // Open left (right physical)
+                    rightTrapdoor.setPosition(0.0);  // Open right (left physical)
                 } else if (currentShootLeft) {
-                    leftTrapdoor.setPosition(0.2);
-                    rightTrapdoor.setPosition(0.1);
+                    // Ball is on LEFT side, open RIGHT trapdoor (left physical)
+                    leftTrapdoor.setPosition(0.1);   // Closed
+                    rightTrapdoor.setPosition(0.0);  // Open
                 } else {
-                    leftTrapdoor.setPosition(0.1);
-                    rightTrapdoor.setPosition(0.0);
+                    // Ball is on RIGHT side, open LEFT trapdoor (right physical)
+                    leftTrapdoor.setPosition(0.2);   // Open
+                    rightTrapdoor.setPosition(0.1);  // Closed
                 }
             }
 
@@ -571,14 +574,17 @@ public class Auto extends OpMode {
             }
 
             // Kicker arm activation
+            // Note: Physical kicker arms are swapped - "left" kicker controls right side ball
             if (elapsedMs >= 500) {
                 if (isThirdBall) {
                     leftKickerArm.setPosition(0.5);
                     rightKickerArm.setPosition(0.075);
                 } else if (currentShootLeft) {
-                    leftKickerArm.setPosition(0.5);
-                } else {
+                    // Ball is on LEFT side, use RIGHT kicker (left physical)
                     rightKickerArm.setPosition(0.075);
+                } else {
+                    // Ball is on RIGHT side, use LEFT kicker (right physical)
+                    leftKickerArm.setPosition(0.5);
                 }
             }
 
@@ -654,12 +660,15 @@ public class Auto extends OpMode {
         shotFired = false;
         intakeReversed = false;
 
+        // Physical trapdoors are swapped
         if (shootLeft) {
-            leftTrapdoor.setPosition(0.2);   // Open
-            rightTrapdoor.setPosition(0.1);  // Closed
-        } else {
+            // Ball is on LEFT side, open RIGHT trapdoor (left physical)
             leftTrapdoor.setPosition(0.1);   // Closed
             rightTrapdoor.setPosition(0.0);  // Open
+        } else {
+            // Ball is on RIGHT side, open LEFT trapdoor (right physical)
+            leftTrapdoor.setPosition(0.2);   // Open
+            rightTrapdoor.setPosition(0.1);  // Closed
         }
 
         leftTransfer.setPosition(0.5);   // DOWN position
@@ -682,12 +691,15 @@ public class Auto extends OpMode {
 
         double elapsedMs = shootTimer.seconds() * 1000;
 
+        // Physical trapdoors are swapped
         if (currentShootLeft) {
-            leftTrapdoor.setPosition(0.2);   // Open
-            rightTrapdoor.setPosition(0.1);  // Closed
-        } else {
+            // Ball is on LEFT side, open RIGHT trapdoor (left physical)
             leftTrapdoor.setPosition(0.1);   // Closed
             rightTrapdoor.setPosition(0.0);  // Open
+        } else {
+            // Ball is on RIGHT side, open LEFT trapdoor (right physical)
+            leftTrapdoor.setPosition(0.2);   // Open
+            rightTrapdoor.setPosition(0.1);  // Closed
         }
 
         if (elapsedMs < 900) {
@@ -698,11 +710,14 @@ public class Auto extends OpMode {
             intake.setPower(-1.0);
         }
 
+        // Physical kicker arms are swapped
         if (elapsedMs >= 500) {
             if (currentShootLeft) {
-                leftKickerArm.setPosition(0.5);
-            } else {
+                // Ball is on LEFT side, use RIGHT kicker (left physical)
                 rightKickerArm.setPosition(0.075);
+            } else {
+                // Ball is on RIGHT side, use LEFT kicker (right physical)
+                leftKickerArm.setPosition(0.5);
             }
         }
 
