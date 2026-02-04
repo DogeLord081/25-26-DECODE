@@ -780,8 +780,8 @@ public class Auto extends OpMode {
         // Initialize servos
         leftTrapdoor = hardwareMap.get(Servo.class, "leftTrapdoor");
         rightTrapdoor = hardwareMap.get(Servo.class, "rightTrapdoor");
-        leftTransfer = hardwareMap.get(Servo.class, "leftTransfer");
-        rightTransfer = hardwareMap.get(Servo.class, "rightTransfer");
+        rightTransfer = hardwareMap.get(Servo.class, "leftTransfer");
+        leftTransfer = hardwareMap.get(Servo.class, "rightTransfer");
         leftKickerArm = hardwareMap.get(Servo.class, "leftKickerArm");
         rightKickerArm = hardwareMap.get(Servo.class, "rightKickerArm");
         leftHoodAdjustment = hardwareMap.get(Servo.class, "leftHoodAdjustment");

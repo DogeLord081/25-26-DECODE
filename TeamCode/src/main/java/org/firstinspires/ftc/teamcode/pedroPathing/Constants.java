@@ -23,13 +23,13 @@ public class Constants {
             .leftRearMotorName("leftBack")
             .leftFrontMotorName("leftFront")
             .leftFrontMotorDirection(DcMotorSimple.Direction.REVERSE)
-            .leftRearMotorDirection(DcMotorSimple.Direction.REVERSE)
+            .leftRearMotorDirection(DcMotorSimple.Direction.FORWARD)
             .rightFrontMotorDirection(DcMotorSimple.Direction.FORWARD)
-            .rightRearMotorDirection(DcMotorSimple.Direction.FORWARD);
+            .rightRearMotorDirection(DcMotorSimple.Direction.REVERSE);
     public static ThreeWheelIMUConstants localizerConstants = new ThreeWheelIMUConstants()
-            .turnTicksToInches(0.001965)
-            .strafeTicksToInches(0.00198)
-            .forwardTicksToInches(0.00375)
+            .turnTicksToInches(0.00192931)
+            .strafeTicksToInches(0.00194688)
+            .forwardTicksToInches(0.001923)
             .leftPodY(6.102362)
             .rightPodY(-6.102362)
             .strafePodX(1.830709)

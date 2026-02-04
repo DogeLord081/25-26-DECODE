@@ -60,8 +60,8 @@ public class Tele extends OpMode {
     // Auto-aim target position - dynamically calculated based on approach angle
     // Angle lookup: {angle (degrees), target X percent from left}
     private static final double[][] ANGLE_TO_TARGET_LOOKUP = {
-            {45, 0.90},   // 45 degrees to the left → tag at 90% from left
-            {90, 0.75},   // Head on (90 degrees) → tag at 75% from left
+            {45, 0.60},   // 45 degrees to the left → tag at 90% from left
+            {90, 0.60},   // Head on (90 degrees) → tag at 60% from left
             {135, 0.60}   // 45 degrees to the right → tag at 60% from left
     };
     private static final double AIM_TOLERANCE_PIXELS = 15.0;
@@ -84,7 +84,7 @@ public class Tele extends OpMode {
     };
 
     // Shooter PID constants
-    private static final double SHOOTER_KP = 0.002;
+    private static final double SHOOTER_KP = 0.0015;
     private static final double SHOOTER_KI = 0.00001;
     private static final double SHOOTER_KD = 0.00001;
     private static final double SHOOTER_KF = 1.0 / MAX_SHOOTER_RPM;
@@ -167,6 +167,8 @@ public class Tele extends OpMode {
     private boolean distanceCheckPassed = false; // Tracks if ball was detected at 3000ms
     private boolean shotFired = false;  // Tracks if the transfer was opened (shot fired)
     private boolean intakeReversed = false; // Tracks if intake was reversed after distance check
+    private boolean restartIntakePulseActive = false; // Tracks if restart intake pulse is in progress
+    private ElapsedTime restartIntakePulseTimer = new ElapsedTime(); // Timer for restart intake pulse
     private boolean kickLeft = false; // Track if left side should be kicked
     private boolean kickRight = false; // Track if right side should be kicked
     private boolean singleBallMode = false; // True if proximity > 6.5 (only one ball)
@@ -814,7 +816,20 @@ public class Tele extends OpMode {
         double rpmUpperBound = targetShooterRPM * (1.0 + RPM_TOLERANCE_PERCENT);
         boolean rpmReady = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
 
-        intake.setPower(-1.0);
+        // Handle restart intake pulse completion (after 100ms, set intake back to -1.0 and transfers down)
+        if (restartIntakePulseActive && restartIntakePulseTimer.milliseconds() >= 150) {
+            intake.setPower(-1.0);
+            restartIntakePulseActive = false;
+            // Now set transfer positions (DOWN)
+            leftTransfer.setPosition(0.5);
+            rightTransfer.setPosition(0.0);
+            transfersUp = false;
+        }
+
+        // Only set intake to -1.0 if not in restart pulse mode
+        if (!restartIntakePulseActive) {
+            intake.setPower(-1.0);
+        }
 
 // CONTINUOUS DISTANCE CHECK (Starts after 200ms to allow trapdoor movement)
         if (shootSequenceTimer.milliseconds() >= 200 && !distanceCheckPassed) {
@@ -847,7 +862,7 @@ public class Tele extends OpMode {
         }
 
         // TIMEOUT SAFETY (3 seconds)
-        if (shootSequenceTimer.milliseconds() >= 3000 && !distanceCheckPassed) {
+        if (shootSequenceTimer.milliseconds() >= 1500 && !distanceCheckPassed) {
             restartShootSequence();
             return;
         }
@@ -883,6 +898,7 @@ public class Tele extends OpMode {
             distanceCheckPassed = false;
             shotFired = false;
             intakeReversed = false;
+            restartIntakePulseActive = false;
             kickLeft = false;
             kickRight = false;
             singleBallMode = false;
@@ -896,6 +912,7 @@ public class Tele extends OpMode {
         distanceCheckPassed = false;
         shotFired = false;
         intakeReversed = false;
+        restartIntakePulseActive = false;
         kickLeft = false;
         kickRight = false;
         singleBallMode = false;
@@ -953,9 +970,10 @@ public class Tele extends OpMode {
             rightTrapdoor.setPosition(0.1);  // Closed
         }
 
-        // Reset transfer positions (DOWN)
-        leftTransfer.setPosition(0.5);
-        rightTransfer.setPosition(0.0);
+        // Start intake pulse - spin forward to help ball drop
+        intake.setPower(1.0);
+        restartIntakePulseActive = true;
+        restartIntakePulseTimer.reset();
 
         // Reset kicker arms
         leftKickerArm.setPosition(0.0);
