@@ -69,6 +69,7 @@ public class Tele extends OpMode {
 
     // ========== SHOOTER LOOKUP TABLE & PID CONSTANTS ==========
     private static final double MAX_SHOOTER_RPM = 4900.0;
+    private static final double DUMP_RPM = 1000.0;  // Low RPM to dump wrong-color balls without scoring
     private static final double[][] SHOOTER_LOOKUP_TABLE = {
             {18, 0.05, 1800},
             {24, 0.05, 1800},
@@ -185,6 +186,8 @@ public class Tele extends OpMode {
     private int currentBallIndex = 0;  // 0, 1, 2 for the three balls
     private boolean shootSideDecided = false;
     private ElapsedTime shootTimer = new ElapsedTime();
+    private boolean dumpMode = false;  // True when shooting wrong-color ball at low RPM
+    private double currentTargetRPM = 0.0;  // Current target RPM for 3-ball sequence
 
     // Debug timing
     private ElapsedTime debugTimer = new ElapsedTime();
@@ -631,12 +634,16 @@ public class Tele extends OpMode {
         // PID control for shooter RPM
         // Determine effective target RPM:
         // - If shooter is off: 0 RPM
+        // - If 3-ball sequence is active: use currentTargetRPM (may be DUMP_RPM or normal)
         // - If shoot sequence is active: use targetShooterRPM (set when sequence started)
         // - If shooter is on but no active sequence and auto-aiming at a tag: use lookup RPM
         // - If shooter is on but no active sequence and not auto-aiming: idle RPM
         double effectiveTargetRPM = 0.0;
         if (shooterSpeedOn) {
-            if (shootSequenceActive && targetShooterRPM > 0) {
+            if (threeBallSequenceActive && currentTargetRPM > 0) {
+                // During 3-ball sequence, use currentTargetRPM (supports dump mode)
+                effectiveTargetRPM = currentTargetRPM;
+            } else if (shootSequenceActive && targetShooterRPM > 0) {
                 // During shoot sequence, use the target RPM set when sequence started
                 effectiveTargetRPM = targetShooterRPM;
             } else if (autoAimEnabled && tagDetected && targetShooterRPM > 0) {
@@ -646,7 +653,7 @@ public class Tele extends OpMode {
                 // Idle - use minimum RPM
                 effectiveTargetRPM = MIN_IDLE_SHOOTER_RPM;
                 // Update targetShooterRPM to reflect what we're actually using (for telemetry)
-                if (!shootSequenceActive) {
+                if (!shootSequenceActive && !threeBallSequenceActive) {
                     targetShooterRPM = MIN_IDLE_SHOOTER_RPM;
                 }
             }
@@ -782,6 +789,8 @@ public class Tele extends OpMode {
             telemetry.addData("Shot Fired", shotFired ? "YES" : "NO");
             telemetry.addData("Kick Left", kickLeft);
             telemetry.addData("Kick Right", kickRight);
+            telemetry.addData("Dump Mode", dumpMode ? "YES - DUMPING WRONG COLOR @ " + DUMP_RPM + " RPM" : "NO");
+            telemetry.addData("Current Target RPM", "%.0f", currentTargetRPM);
         }
 
         // Show what's needed to shoot
@@ -1081,6 +1090,7 @@ public class Tele extends OpMode {
         restartIntakePulseActive = false;
         kickLeft = false;
         kickRight = false;
+        dumpMode = false;
 
         // Enable shooter so PID control will run the motor to target RPM
         shooterSpeedOn = true;
@@ -1095,14 +1105,17 @@ public class Tele extends OpMode {
             targetShooterRPM = 2000.0;
         }
 
+        // Initialize currentTargetRPM to normal shooting RPM
+        currentTargetRPM = targetShooterRPM;
+
         // Set transfer to down (open) position for shooting
         leftTransfer.setPosition(0.5);
         rightTransfer.setPosition(0.0);
         transfersUp = false;
 
         // Reset kicker arms
-        leftKickerArm.setPosition(0.0);
-        rightKickerArm.setPosition(0.5);
+        leftTrapdoor.setPosition(0.1);
+        rightTrapdoor.setPosition(0.1);
     }
 
     /**
@@ -1116,52 +1129,90 @@ public class Tele extends OpMode {
             return;
         }
 
-        double rpmLowerBound = targetShooterRPM * (1.0 - RPM_TOLERANCE_PERCENT);
-        double rpmUpperBound = targetShooterRPM * (1.0 + RPM_TOLERANCE_PERCENT);
-        boolean rpmReady = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
-
         // Determine which side to shoot from using webcam color detection
-        // Wait 300ms for ball to settle/intake to move it before scanning
-        if (!shootSideDecided && shootTimer.milliseconds() > 300) {
+        // Wait 300ms for first ball, 500ms for subsequent balls to allow ball to drop
+        double scanWaitTime = (currentBallIndex == 0) ? 300 : 500;
+        if (!shootSideDecided && shootTimer.milliseconds() > scanWaitTime) {
             char targetColor = ballOrder[currentBallIndex];
             boolean isThirdBall = (currentBallIndex == 2);
 
+            // Use webcam color detection to find the ball
+            ColorRegionProcessor.AnalysisResult colorResult = colorProcessor.getAnalysis();
+            String leftColor = colorResult.leftColor;
+            String rightColor = colorResult.rightColor;
+
+            boolean leftMatchesTarget = false;
+            boolean rightMatchesTarget = false;
+            boolean leftHasWrongColor = false;
+            boolean rightHasWrongColor = false;
+            boolean anyColorDetected = !leftColor.equals("NEITHER") || !rightColor.equals("NEITHER");
+
+            if (targetColor == 'P') {
+                leftMatchesTarget = leftColor.equals("PURPLE");
+                rightMatchesTarget = rightColor.equals("PURPLE");
+                leftHasWrongColor = leftColor.equals("GREEN");
+                rightHasWrongColor = rightColor.equals("GREEN");
+            } else { // targetColor == 'G'
+                leftMatchesTarget = leftColor.equals("GREEN");
+                rightMatchesTarget = rightColor.equals("GREEN");
+                leftHasWrongColor = leftColor.equals("PURPLE");
+                rightHasWrongColor = rightColor.equals("PURPLE");
+            }
+
+            // If no color detected yet and we haven't timed out, keep waiting
+            if (!anyColorDetected && shootTimer.milliseconds() < 1200) {
+                // Don't make a decision yet, keep scanning
+                return;
+            }
+
             if (isThirdBall) {
-                // Third ball - open both trapdoors no matter what
+                // Third ball - open both trapdoors no matter what, use normal RPM
                 kickLeft = true;
                 kickRight = true;
+                dumpMode = false;
+                currentTargetRPM = targetShooterRPM;  // Use the LUT-based RPM
             } else {
-                // Use webcam color detection to find the ball
-                ColorRegionProcessor.AnalysisResult colorResult = colorProcessor.getAnalysis();
-                String leftColor = colorResult.leftColor;
-                String rightColor = colorResult.rightColor;
+                // Check if target color is found
+                if (leftMatchesTarget || rightMatchesTarget) {
+                    // Target color found - shoot normally
+                    dumpMode = false;
+                    currentTargetRPM = targetShooterRPM;  // Use the LUT-based RPM
 
-                boolean leftMatchesTarget = false;
-                boolean rightMatchesTarget = false;
+                    // Determine which side to kick based on color detection
+                    if (leftMatchesTarget && !rightMatchesTarget) {
+                        kickLeft = true;
+                        kickRight = false;
+                    } else if (rightMatchesTarget && !leftMatchesTarget) {
+                        kickLeft = false;
+                        kickRight = true;
+                    } else {
+                        // Both sides have target color - prioritize left
+                        kickLeft = true;
+                        kickRight = false;
+                    }
+                } else if (leftHasWrongColor || rightHasWrongColor) {
+                    // Wrong color found, no target color - dump mode!
+                    dumpMode = true;
+                    currentTargetRPM = DUMP_RPM;
 
-                if (targetColor == 'P') {
-                    leftMatchesTarget = leftColor.equals("PURPLE");
-                    rightMatchesTarget = rightColor.equals("PURPLE");
-                } else { // targetColor == 'G'
-                    leftMatchesTarget = leftColor.equals("GREEN");
-                    rightMatchesTarget = rightColor.equals("GREEN");
-                }
-
-                // Determine which side to kick based on color detection
-                if (leftMatchesTarget && !rightMatchesTarget) {
-                    kickLeft = true;
-                    kickRight = false;
-                } else if (rightMatchesTarget && !leftMatchesTarget) {
-                    kickLeft = false;
-                    kickRight = true;
-                } else if (leftMatchesTarget && rightMatchesTarget) {
-                    // Both sides have target color - prioritize left
-                    kickLeft = true;
-                    kickRight = false;
+                    // Kick the wrong-color ball to dump it
+                    if (leftHasWrongColor && !rightHasWrongColor) {
+                        kickLeft = true;
+                        kickRight = false;
+                    } else if (rightHasWrongColor && !leftHasWrongColor) {
+                        kickLeft = false;
+                        kickRight = true;
+                    } else {
+                        // Both sides have wrong color - prioritize left
+                        kickLeft = true;
+                        kickRight = false;
+                    }
                 } else {
-                    // No color detected - open both trapdoors
+                    // No color detected on either side - open both trapdoors, normal RPM
                     kickLeft = true;
                     kickRight = true;
+                    dumpMode = false;
+                    currentTargetRPM = targetShooterRPM;
                 }
             }
 
@@ -1211,6 +1262,11 @@ public class Tele extends OpMode {
         }
 
         // Continuous distance check (starts after 200ms for trapdoor movement)
+        // Calculate rpmReady here so it uses the current value of currentTargetRPM (may be DUMP_RPM)
+        double rpmLowerBound = currentTargetRPM * (1.0 - RPM_TOLERANCE_PERCENT);
+        double rpmUpperBound = currentTargetRPM * (1.0 + RPM_TOLERANCE_PERCENT);
+        boolean rpmReady = currentTargetRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
+
         if (shootTimer.milliseconds() >= 200 && !distanceCheckPassed) {
             double distance = distanceSensor.getDistance(DistanceUnit.CM);
             if (distance < 20 && rpmReady) {
@@ -1274,6 +1330,8 @@ public class Tele extends OpMode {
             restartIntakePulseActive = false;
             kickLeft = false;
             kickRight = false;
+            dumpMode = false;
+            currentTargetRPM = targetShooterRPM;  // Reset to normal RPM for next ball
             shootTimer.reset();
         }
     }
@@ -1325,6 +1383,8 @@ public class Tele extends OpMode {
         restartIntakePulseActive = false;
         kickLeft = false;
         kickRight = false;
+        dumpMode = false;
+        currentTargetRPM = 0.0;
 
         // Reset servos to closed positions
         leftTrapdoor.setPosition(0.1);
