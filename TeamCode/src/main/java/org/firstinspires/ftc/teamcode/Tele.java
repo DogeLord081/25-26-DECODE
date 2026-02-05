@@ -852,7 +852,7 @@ public class Tele extends OpMode {
 // CONTINUOUS DISTANCE CHECK (Starts after 200ms to allow trapdoor movement)
         if (shootSequenceTimer.milliseconds() >= 200 && !distanceCheckPassed) {
             double distance = distanceSensor.getDistance(DistanceUnit.CM);
-            if (distance < 20) { // Ball Detected
+            if (distance < 20 && rpmReady) { // Ball Detected
                 distanceCheckPassed = true;
                 // Immediately move transfer UP (to bring ball to flywheel)
                 leftTransfer.setPosition(0.0);   // UP position

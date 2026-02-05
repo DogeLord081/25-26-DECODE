@@ -51,7 +51,7 @@ public class Constants {
         .translationalPIDFCoefficients(new PIDFCoefficients(0.29, 0, 0.03687321, 0.066))
         .lateralZeroPowerAcceleration(-62.7312857143)
         .forwardZeroPowerAcceleration(-29.17948)
-        .mass(15.8757)
+        .mass(12.0755361)
         .useSecondaryTranslationalPIDF(true)
         .useSecondaryHeadingPIDF(true)
         .useSecondaryDrivePIDF(false);

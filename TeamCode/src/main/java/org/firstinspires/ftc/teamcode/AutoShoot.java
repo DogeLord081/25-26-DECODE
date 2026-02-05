@@ -98,11 +98,11 @@ public class AutoShoot extends OpMode {
     private char[] ballOrder = new char[3];
 
     /* Define poses for the autonomous routine */
-    private final Pose startPose = new Pose(26.63157142857142, 129.60802107728338, Math.toRadians(325));
+    private final Pose startPose = new Pose(26.63157142857142, 127.60802107728338, Math.toRadians(325));
     private final Pose scorePose = new Pose(52.328, 115.18032786885244, Math.toRadians(250));
-    private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(328));
-    private final Pose afterShootPose = new Pose(41.55750819672132, 73.73770491803278, Math.toRadians(180));
-    private final Pose intakeBallsPose = new Pose(8.55750819672132, 73.73770491803278, Math.toRadians(180));
+    private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(320));
+    private final Pose afterShootPose = new Pose(41.55750819672132, 57.73770491803278, Math.toRadians(180));
+    private final Pose intakeBallsPose = new Pose(8.55750819672132, 57.73770491803278, Math.toRadians(180));
 
     /* Path declarations */
     private Path scorePreload;
@@ -363,21 +363,19 @@ public class AutoShoot extends OpMode {
         shooter.setPower(power);
     }
 
-    /** Check if RPM is within tolerance **/
-    private boolean isRPMReady() {
-        double rpmLowerBound = TARGET_RPM * (1.0 - RPM_TOLERANCE_PERCENT);
-        double rpmUpperBound = TARGET_RPM * (1.0 + RPM_TOLERANCE_PERCENT);
-        return shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
-    }
-
     /** Execute the shooting sequence using webcam color detection like Tele.java **/
     private void executeShootSequence() {
         if (currentBallIndex >= 3) {
             return;
         }
 
+        double rpmLowerBound = TARGET_RPM * (1.0 - RPM_TOLERANCE_PERCENT);
+        double rpmUpperBound = TARGET_RPM * (1.0 + RPM_TOLERANCE_PERCENT);
+        boolean rpmReady = shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
+
         // Determine which side to shoot from using webcam color detection
-        if (!shootSideDecided) {
+        // Wait 300ms for ball to settle/intake to move it before scanning to prevent errors
+        if (!shootSideDecided && shootTimer.milliseconds() > 300) {
             char targetColor = ballOrder[currentBallIndex];
             boolean isThirdBall = (currentBallIndex == 2);
 
@@ -427,21 +425,17 @@ public class AutoShoot extends OpMode {
             if (kickLeft && kickRight) {
                 leftTrapdoor.setPosition(0.2);   // Open
                 rightTrapdoor.setPosition(0.0);  // Open
-                leftKickerArm.setPosition(0.5);
-                rightKickerArm.setPosition(0.075);
                 bothTrapdoorsOpen = true;
             } else if (kickLeft) {
                 // Ball is on LEFT side, open RIGHT trapdoor
-                leftTrapdoor.setPosition(0.1);   // Closed
+                leftTrapdoor.setPosition(0.0);   // Closed
                 rightTrapdoor.setPosition(0.0);  // Open
-                rightKickerArm.setPosition(0.075);
                 leftTrapdoorOpen = false;
                 rightTrapdoorOpen = true;
             } else {
                 // Ball is on RIGHT side, open LEFT trapdoor
                 leftTrapdoor.setPosition(0.2);   // Open
-                rightTrapdoor.setPosition(0.1);  // Closed
-                leftKickerArm.setPosition(0.5);
+                rightTrapdoor.setPosition(0.2);  // Closed
                 leftTrapdoorOpen = true;
                 rightTrapdoorOpen = false;
             }
@@ -470,34 +464,31 @@ public class AutoShoot extends OpMode {
         // Continuous distance check (starts after 200ms for trapdoor movement)
         if (shootTimer.milliseconds() >= 200 && !distanceCheckPassed) {
             double distance = distanceSensor.getDistance(DistanceUnit.CM);
-            if (distance < 20) {
+            if (distance < 20 & rpmReady) {
                 distanceCheckPassed = true;
 
-                // Check if RPM is ready - if so, immediately move transfers up
-                if (isRPMReady()) {
-                    leftTransfer.setPosition(0.0);   // UP
-                    rightTransfer.setPosition(0.5);  // UP
-                    transfersUp = true;
-                    intake.setPower(-1.0);
-                    intakeReversed = false;
-                    transferTimer.reset();
+                leftTransfer.setPosition(0.0);   // UP
+                rightTransfer.setPosition(0.5);  // UP
+                transfersUp = true;
+                intake.setPower(-1.0);
+                intakeReversed = false;
+                transferTimer.reset();
 
-                    // Close both trapdoors
-                    leftTrapdoor.setPosition(0.1);
-                    rightTrapdoor.setPosition(0.1);
-                    leftTrapdoorOpen = false;
-                    rightTrapdoorOpen = false;
-                    bothTrapdoorsOpen = false;
+                // Close both trapdoors
+                leftTrapdoor.setPosition(0.1);
+                rightTrapdoor.setPosition(0.1);
+                leftTrapdoorOpen = false;
+                rightTrapdoorOpen = false;
+                bothTrapdoorsOpen = false;
 
-                    // Shot is being fired
-                    shotFired = true;
-                    shotFiredTimer.reset();
-                }
+                // Shot is being fired
+                shotFired = true;
+                shotFiredTimer.reset();
             }
         }
 
         // If distance check passed but RPM wasn't ready, keep checking
-        if (distanceCheckPassed && !shotFired && isRPMReady()) {
+        if (distanceCheckPassed && !shotFired && rpmReady) {
             leftTransfer.setPosition(0.0);   // UP
             rightTransfer.setPosition(0.5);  // UP
             transfersUp = true;
@@ -568,14 +559,14 @@ public class AutoShoot extends OpMode {
             leftTrapdoor.setPosition(0.2);
             rightTrapdoor.setPosition(0.0);
         } else if (kickLeft) {
-            leftTrapdoor.setPosition(0.1);
+            leftTrapdoor.setPosition(0.0);
             rightTrapdoor.setPosition(0.0);
         } else if (kickRight) {
             leftTrapdoor.setPosition(0.2);
-            rightTrapdoor.setPosition(0.1);
+            rightTrapdoor.setPosition(0.2);
         } else {
             leftTrapdoor.setPosition(0.1);
-            rightTrapdoor.setPosition(0.0);
+            rightTrapdoor.setPosition(0.1);
         }
 
         // Start intake pulse
@@ -624,7 +615,7 @@ public class AutoShoot extends OpMode {
         telemetry.addData("--- SHOOTER ---", "");
         telemetry.addData("Target RPM", TARGET_RPM);
         telemetry.addData("Current RPM", "%.0f", shooterRPM);
-        telemetry.addData("RPM Ready", isRPMReady() ? "YES" : "NO");
+        // telemetry.addData("RPM Ready", rpmReady ? "YES" : "NO");
 
         // Shooting sequence status
         if (pathState == 3 || pathState == 4 || pathState == 9 || pathState == 10) {
@@ -680,8 +671,8 @@ public class AutoShoot extends OpMode {
         // Initialize servos
         leftTrapdoor = hardwareMap.get(Servo.class, "leftTrapdoor");
         rightTrapdoor = hardwareMap.get(Servo.class, "rightTrapdoor");
-        leftTransfer = hardwareMap.get(Servo.class, "rightTransfer");
-        rightTransfer = hardwareMap.get(Servo.class, "leftTransfer");
+        rightTransfer = hardwareMap.get(Servo.class, "rightTransfer");
+        leftTransfer = hardwareMap.get(Servo.class, "leftTransfer");
         leftKickerArm = hardwareMap.get(Servo.class, "leftKickerArm");
         rightKickerArm = hardwareMap.get(Servo.class, "rightKickerArm");
         leftHoodAdjustment = hardwareMap.get(Servo.class, "leftHoodAdjustment");
