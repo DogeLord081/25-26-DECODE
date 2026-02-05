@@ -118,6 +118,7 @@ public class Tele extends OpMode {
     private ElapsedTime velocityTimer = new ElapsedTime();
     private double shooterIntegral = 0.0;
     private double shooterLastError = 0.0;
+    private boolean encoderWorking = true;  // Tracks if shooter encoder is functioning
 
     // Hood adjustment positions
     private double leftHoodPosition = 0.15;
@@ -166,6 +167,7 @@ public class Tele extends OpMode {
     private boolean shootSequenceActive = false;
     private boolean autoTransferTriggered = false;  // For RPM-based auto transfer
     private boolean distanceCheckPassed = false; // Tracks if ball was detected at 3000ms
+    private boolean ballDetectedWaitingForRpm = false; // Ball detected, trapdoors closed, waiting for RPM
     private boolean shotFired = false;  // Tracks if the transfer was opened (shot fired)
     private boolean intakeReversed = false; // Tracks if intake was reversed after distance check
     private boolean restartIntakePulseActive = false; // Tracks if restart intake pulse is in progress
@@ -188,6 +190,8 @@ public class Tele extends OpMode {
     private ElapsedTime shootTimer = new ElapsedTime();
     private boolean dumpMode = false;  // True when shooting wrong-color ball at low RPM
     private double currentTargetRPM = 0.0;  // Current target RPM for 3-ball sequence
+    private boolean waitingForTransferCycle = false;  // True when waiting for transfers to go up and back down
+    private ElapsedTime transferCycleTimer = new ElapsedTime();  // Timer for transfer cycle
 
     // Debug timing
     private ElapsedTime debugTimer = new ElapsedTime();
@@ -401,13 +405,13 @@ public class Tele extends OpMode {
             } else {
                 // Not auto-aiming, so RPM will be set to idle (if shooter is on) later
                 // Only set if not in active shoot sequence
-                if (!shootSequenceActive) {
+                if (!shootSequenceActive && !threeBallSequenceActive) {
                     targetShooterRPM = 0.0;
                 }
             }
         } else {
             // No tag detected - if auto-aim is enabled and not in shoot sequence, reset target RPM
-            if (autoAimEnabled && !shootSequenceActive) {
+            if (autoAimEnabled && !shootSequenceActive && !threeBallSequenceActive) {
                 targetShooterRPM = 0.0;
             }
         }
@@ -470,11 +474,11 @@ public class Tele extends OpMode {
                 // Set ball order based on AprilTag ID
                 // ID 1: PPG, ID 2: PGP, ID 3: GPP
                 switch (detectedAprilTagId) {
-                    case 1:
-                        ballOrder = new char[]{'P', 'P', 'G'};
-                        break;
                     case 2:
                         ballOrder = new char[]{'P', 'G', 'P'};
+                        break;
+                    case 1:
+                        ballOrder = new char[]{'P', 'P', 'G'};
                         break;
                     case 3:
                         ballOrder = new char[]{'G', 'P', 'P'};
@@ -577,7 +581,7 @@ public class Tele extends OpMode {
                     double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
                     rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
                     rightHoodAdjustment.setPosition(rightHoodPosition);
-                    targetShooterRPM = 2000.0;
+                    targetShooterRPM = 1800.0;
                 }
                 startShootSequence();
             }
@@ -597,7 +601,7 @@ public class Tele extends OpMode {
                     double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
                     rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
                     rightHoodAdjustment.setPosition(rightHoodPosition);
-                    targetShooterRPM = 2000.0;
+                    targetShooterRPM = 1800.0;
                 }
                 startShootSequence();
             }
@@ -624,9 +628,9 @@ public class Tele extends OpMode {
 
         if (deltaTime > 0.02) {  // Update velocity every 20ms
             int deltaTicks = currentShooterPosition - lastShooterEncoderPosition;
-            double ticksPerSecond = Math.abs(deltaTicks / deltaTime);
+            double ticksPerSecond = (double) deltaTicks / deltaTime;  // Cast to double to ensure floating point division
             // Convert ticks/second to RPM: (ticks/sec) / (ticks/rev) * 60 = RPM
-            shooterRPM = (ticksPerSecond / SHOOTER_TICKS_PER_REV) * 60.0;
+            shooterRPM = Math.abs((ticksPerSecond / SHOOTER_TICKS_PER_REV) * 60.0);
             lastShooterEncoderPosition = currentShooterPosition;
             velocityTimer.reset();
         }
@@ -659,26 +663,41 @@ public class Tele extends OpMode {
             }
         }
 
+        // Detect if encoder is not working (RPM stays 0 while motor is powered)
+        encoderWorking = !(shooterPower > 0.3 && shooterRPM < 100 && velocityTimer.seconds() > 0.5);
+
         if (effectiveTargetRPM > 0) {
-            double error = effectiveTargetRPM - shooterRPM;
+            if (encoderWorking) {
+                // Normal PID control
+                double error = effectiveTargetRPM - shooterRPM;
 
-            // Integrate error (with anti-windup)
-            shooterIntegral += error * deltaTime;
-            shooterIntegral = Range.clip(shooterIntegral, -5000, 5000);
+                // Integrate error (with anti-windup)
+                shooterIntegral += error * deltaTime;
+                shooterIntegral = Range.clip(shooterIntegral, -5000, 5000);
 
-            // Calculate derivative
-            double derivative = (error - shooterLastError) / deltaTime;
-            shooterLastError = error;
+                // Calculate derivative
+                double derivative = (error - shooterLastError) / deltaTime;
+                shooterLastError = error;
 
-            // Calculate feedforward (base power to reach target RPM)
-            double feedforward = effectiveTargetRPM * SHOOTER_KF;
+                // Calculate feedforward (base power to reach target RPM)
+                double feedforward = effectiveTargetRPM * SHOOTER_KF;
 
-            // Calculate PID output
-            double pidOutput = (SHOOTER_KP * error) + (SHOOTER_KI * shooterIntegral) + (SHOOTER_KD * derivative);
+                // Calculate PID output
+                double pidOutput = (SHOOTER_KP * error) + (SHOOTER_KI * shooterIntegral) + (SHOOTER_KD * derivative);
 
-            // Combine feedforward and PID
-            shooterPower = feedforward + pidOutput;
-            shooterPower = Range.clip(shooterPower, 0.0, 1.0);
+                // Combine feedforward and PID
+                shooterPower = feedforward + pidOutput;
+                shooterPower = Range.clip(shooterPower, 0.0, 1.0);
+            } else {
+                // Encoder not working - use feedforward only (open loop control)
+                // This prevents runaway acceleration when encoder reads 0
+                shooterPower = effectiveTargetRPM * SHOOTER_KF;
+                shooterPower = Range.clip(shooterPower, 0.0, 0.8);  // Cap at 80% for safety
+                shooterIntegral = 0.0;  // Reset integral to prevent windup
+                shooterLastError = 0.0;
+                // Fake the RPM for rpmReady checks (assume feedforward is accurate)
+                shooterRPM = effectiveTargetRPM * shooterPower / (effectiveTargetRPM * SHOOTER_KF);
+            }
         } else {
             // Reset PID state when shooter is off
             shooterPower = 0.0;
@@ -763,6 +782,8 @@ public class Tele extends OpMode {
         telemetry.addData("Shooter Enabled", shooterSpeedOn ? "ON" : "OFF");
         telemetry.addData("Target RPM", "%.0f", targetShooterRPM);
         telemetry.addData("Actual RPM", "%.0f", shooterRPM);
+        telemetry.addData("Encoder Position", shooter.getCurrentPosition());
+        telemetry.addData("Encoder Status", encoderWorking ? "OK" : "FALLBACK MODE (check encoder!)");
         telemetry.addData("Shooter Power", "%.1f%%", shooterPower * 100);
         telemetry.addData("RPM Range (5%%)", "%.0f - %.0f", rpmLowerBound, rpmUpperBound);
         telemetry.addData("RPM In Range", rpmInRange ? "YES - READY TO FIRE!" : "NO - WAITING...");
@@ -931,10 +952,25 @@ public class Tele extends OpMode {
         }
 
 // CONTINUOUS DISTANCE CHECK (Starts after 200ms to allow trapdoor movement)
-        if (shootSequenceTimer.milliseconds() >= 200 && !distanceCheckPassed) {
+        if (!distanceCheckPassed) {
             double distance = distanceSensor.getDistance(DistanceUnit.CM);
-            if (distance < 20 && rpmReady) { // Ball Detected
+
+            // Ball detected - close trapdoors immediately (regardless of RPM)
+            if (distance < 20 && !ballDetectedWaitingForRpm) {
+                // Close both trapdoors immediately
+                leftTrapdoor.setPosition(0.1);   // Closed
+                rightTrapdoor.setPosition(0.1);  // Closed
+                leftTrapdoorOpen = false;
+                rightTrapdoorOpen = false;
+                bothTrapdoorsOpen = false;
+                ballDetectedWaitingForRpm = true;
+            }
+
+            // Once ball detected and RPM is ready, proceed with transfers and intake
+            if (ballDetectedWaitingForRpm && rpmReady) {
                 distanceCheckPassed = true;
+                ballDetectedWaitingForRpm = false;
+
                 // Immediately move transfer UP (to bring ball to flywheel)
                 leftTransfer.setPosition(0.0);   // UP position
                 rightTransfer.setPosition(0.5);  // UP position
@@ -944,13 +980,6 @@ public class Tele extends OpMode {
                 intake.setPower(-1.0);
                 intakeReversed = false;
                 transferTimer.reset();  // Start timer for intake reversal
-
-                // Close both trapdoors immediately
-                leftTrapdoor.setPosition(0.1);   // Closed
-                rightTrapdoor.setPosition(0.1);  // Closed
-                leftTrapdoorOpen = false;
-                rightTrapdoorOpen = false;
-                bothTrapdoorsOpen = false;
             }
         }
 
@@ -992,6 +1021,7 @@ public class Tele extends OpMode {
 
             shootSequenceActive = false;
             distanceCheckPassed = false;
+            ballDetectedWaitingForRpm = false;
             shotFired = false;
             intakeReversed = false;
             restartIntakePulseActive = false;
@@ -1006,6 +1036,7 @@ public class Tele extends OpMode {
         // Stop the sequence and reset all mechanisms
         shootSequenceActive = false;
         distanceCheckPassed = false;
+        ballDetectedWaitingForRpm = false;
         shotFired = false;
         intakeReversed = false;
         restartIntakePulseActive = false;
@@ -1038,6 +1069,7 @@ public class Tele extends OpMode {
         // Reset the timer to restart the cycle from the beginning
         shootSequenceTimer.reset();
         distanceCheckPassed = false;
+        ballDetectedWaitingForRpm = false;
         shotFired = false;
         intakeReversed = false;
 
@@ -1085,12 +1117,14 @@ public class Tele extends OpMode {
         shootTimer.reset();
         shotFired = false;
         distanceCheckPassed = false;
+        ballDetectedWaitingForRpm = false;
         shootSideDecided = false;
         intakeReversed = false;
         restartIntakePulseActive = false;
         kickLeft = false;
         kickRight = false;
         dumpMode = false;
+        waitingForTransferCycle = false;
 
         // Enable shooter so PID control will run the motor to target RPM
         shooterSpeedOn = true;
@@ -1102,7 +1136,7 @@ public class Tele extends OpMode {
             double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
             rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
             rightHoodAdjustment.setPosition(rightHoodPosition);
-            targetShooterRPM = 2000.0;
+            targetShooterRPM = 1800.0;
         }
 
         // Initialize currentTargetRPM to normal shooting RPM
@@ -1127,6 +1161,47 @@ public class Tele extends OpMode {
             // All 3 balls shot, end the sequence
             stopThreeBallSequence();
             return;
+        }
+
+        // Handle transfer cycle completion (waiting for transfers to go up and back down)
+        if (waitingForTransferCycle) {
+            // At 500ms: transfers have gone up, now bring them back down
+            if (transferCycleTimer.milliseconds() >= 500 && transfersUp) {
+                leftTransfer.setPosition(0.5);   // DOWN
+                rightTransfer.setPosition(0.0);  // DOWN
+                transfersUp = false;
+            }
+
+            // Wait time depends on which ball we're transitioning to:
+            // After 1st ball (currentBallIndex=0) → wait 1500ms for 2nd ball
+            // After 2nd ball (currentBallIndex=1) → wait 750ms for 3rd ball
+            double transferCycleWaitTime = (currentBallIndex == 0) ? 1800 : 750;
+
+            // Once wait time elapsed: transfers are back down, now we can proceed to next ball
+            if (transferCycleTimer.milliseconds() >= transferCycleWaitTime) {
+                waitingForTransferCycle = false;
+
+                // Move to next ball
+                currentBallIndex++;
+                shotFired = false;
+                distanceCheckPassed = false;
+                ballDetectedWaitingForRpm = false;
+                intakeReversed = false;
+                shootSideDecided = false;
+                restartIntakePulseActive = false;
+                kickLeft = false;
+                kickRight = false;
+                dumpMode = false;
+                currentTargetRPM = targetShooterRPM;  // Reset to normal RPM for next ball
+                shootTimer.reset();
+
+                // Check if we've completed all 3 balls
+                if (currentBallIndex >= 3) {
+                    stopThreeBallSequence();
+                    return;
+                }
+            }
+            return;  // Don't proceed with rest of logic while waiting for transfer cycle
         }
 
         // Determine which side to shoot from using webcam color detection
@@ -1269,8 +1344,22 @@ public class Tele extends OpMode {
 
         if (shootTimer.milliseconds() >= 200 && !distanceCheckPassed) {
             double distance = distanceSensor.getDistance(DistanceUnit.CM);
-            if (distance < 20 && rpmReady) {
+
+            // Ball detected - close trapdoors immediately (regardless of RPM)
+            if (distance < 20 && !ballDetectedWaitingForRpm) {
+                // Close both trapdoors
+                leftTrapdoor.setPosition(0.1);
+                rightTrapdoor.setPosition(0.1);
+                leftTrapdoorOpen = false;
+                rightTrapdoorOpen = false;
+                bothTrapdoorsOpen = false;
+                ballDetectedWaitingForRpm = true;
+            }
+
+            // Once ball detected and RPM is ready, proceed with transfers and intake
+            if (ballDetectedWaitingForRpm && rpmReady) {
                 distanceCheckPassed = true;
+                ballDetectedWaitingForRpm = false;
 
                 leftTransfer.setPosition(0.0);   // UP
                 rightTransfer.setPosition(0.5);  // UP
@@ -1279,12 +1368,6 @@ public class Tele extends OpMode {
                 intakeReversed = false;
                 transferTimer.reset();
 
-                // Close both trapdoors
-                leftTrapdoor.setPosition(0.1);
-                rightTrapdoor.setPosition(0.1);
-                leftTrapdoorOpen = false;
-                rightTrapdoorOpen = false;
-                bothTrapdoorsOpen = false;
 
                 // Shot is being fired
                 shotFired = true;
@@ -1304,7 +1387,8 @@ public class Tele extends OpMode {
             return;
         }
 
-        // End sequence 750ms after firing - transfers go back down and next ball
+        // End sequence 1300ms after firing - transfers go back down and next ball
+        // (1300ms allows transfers to fully go up and come back down before next trapdoor opens)
         if (shotFired && shotFiredTimer.milliseconds() >= 750) {
             // Close trapdoors and reset kicker arms
             leftTrapdoor.setPosition(0.1);
@@ -1312,27 +1396,18 @@ public class Tele extends OpMode {
             leftKickerArm.setPosition(0.0);
             rightKickerArm.setPosition(0.5);
 
-            // Transfer goes back down
-            leftTransfer.setPosition(0.5);
-            rightTransfer.setPosition(0.0);
-
             leftTrapdoorOpen = false;
             rightTrapdoorOpen = false;
             bothTrapdoorsOpen = false;
-            transfersUp = false;
 
-            // Move to next ball
-            currentBallIndex++;
-            shotFired = false;
-            distanceCheckPassed = false;
-            intakeReversed = false;
-            shootSideDecided = false;
-            restartIntakePulseActive = false;
-            kickLeft = false;
-            kickRight = false;
-            dumpMode = false;
-            currentTargetRPM = targetShooterRPM;  // Reset to normal RPM for next ball
-            shootTimer.reset();
+            // Start the transfer cycle - don't move to next ball yet
+            // The transfer cycle handler at the top of this function will:
+            // 1. Wait for transfers to go up (they're already going up from shotFired)
+            // 2. Bring transfers back down at 500ms
+            // 3. Move to next ball at 1000ms (after transfers are back down)
+            waitingForTransferCycle = true;
+            transferCycleTimer.reset();
+            shotFired = false;  // Reset so we don't re-enter this block
         }
     }
 
@@ -1342,6 +1417,7 @@ public class Tele extends OpMode {
     private void restartBallInSequence() {
         shootTimer.reset();
         distanceCheckPassed = false;
+        ballDetectedWaitingForRpm = false;
         shotFired = false;
         intakeReversed = false;
 
@@ -1378,6 +1454,7 @@ public class Tele extends OpMode {
         currentBallIndex = 0;
         shootSideDecided = false;
         distanceCheckPassed = false;
+        ballDetectedWaitingForRpm = false;
         shotFired = false;
         intakeReversed = false;
         restartIntakePulseActive = false;
@@ -1385,6 +1462,7 @@ public class Tele extends OpMode {
         kickRight = false;
         dumpMode = false;
         currentTargetRPM = 0.0;
+        waitingForTransferCycle = false;
 
         // Reset servos to closed positions
         leftTrapdoor.setPosition(0.1);
