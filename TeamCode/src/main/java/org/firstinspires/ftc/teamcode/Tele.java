@@ -175,6 +175,17 @@ public class Tele extends OpMode {
     private boolean singleBallMode = false; // True if proximity > 6.5 (only one ball)
     private boolean trapdoorsOpenedForSingleBall = false; // Track if trapdoors were opened in single ball mode
 
+    // AprilTag pattern scanning state (for 3-ball auto shoot)
+    private int detectedAprilTagId = -1;
+    private char[] ballOrder = new char[3];  // Ball order based on AprilTag (P = Purple/Left, G = Green/Right)
+    private boolean lastGamepad1AState = false;
+
+    // 3-ball auto shoot sequence state
+    private boolean threeBallSequenceActive = false;
+    private int currentBallIndex = 0;  // 0, 1, 2 for the three balls
+    private boolean shootSideDecided = false;
+    private ElapsedTime shootTimer = new ElapsedTime();
+
     // Debug timing
     private ElapsedTime debugTimer = new ElapsedTime();
 
@@ -442,9 +453,36 @@ public class Tele extends OpMode {
             intake.setPower(1.0); // Intake out (reverse/unjam)
         } else if (intakeToggleOn) {
             intake.setPower(-1.0); // Toggle is on, keep intake running
-        } else {
+        } else if (!shootSequenceActive && !threeBallSequenceActive) {
+            // Only stop intake if no shoot sequence is active
             intake.setPower(0.0);
         }
+
+        // A Button: Scan for AprilTag pattern (like in AutoShoot.java)
+        if (gamepad1.a && !lastGamepad1AState) {
+            HuskyLens.Block[] aprilTagBlocks = huskyLens.blocks();
+            if (aprilTagBlocks.length > 0) {
+                detectedAprilTagId = aprilTagBlocks[0].id;
+
+                // Set ball order based on AprilTag ID
+                // ID 1: PPG, ID 2: PGP, ID 3: GPP
+                switch (detectedAprilTagId) {
+                    case 1:
+                        ballOrder = new char[]{'P', 'P', 'G'};
+                        break;
+                    case 2:
+                        ballOrder = new char[]{'P', 'G', 'P'};
+                        break;
+                    case 3:
+                        ballOrder = new char[]{'G', 'P', 'P'};
+                        break;
+                    default:
+                        ballOrder = new char[]{'P', 'P', 'G'};  // Default fallback
+                        break;
+                }
+            }
+        }
+        lastGamepad1AState = gamepad1.a;
 
         // ========== CONTROLLER 2: THE OPERATOR (Scoring Logic) ==========
 
@@ -649,11 +687,15 @@ public class Tele extends OpMode {
         double rpmUpperBound = targetShooterRPM * (1.0 + RPM_TOLERANCE_PERCENT);
         boolean rpmInRange = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
 
-        // Right Trigger: Stop auto-shoot sequence (bumpers now start the sequence)
+        // Right Trigger: Start 3-ball auto shoot sequence (like in AutoShoot.java)
         boolean rightTriggerPressed = gamepad2.right_trigger > 0.5;
         if (rightTriggerPressed && !lastGamepad2RightTriggerState) {
-            if (shootSequenceActive) {
-                // If sequence is active, stop it
+            if (!threeBallSequenceActive && !shootSequenceActive && detectedAprilTagId != -1) {
+                // Start 3-ball auto shoot sequence if AprilTag was scanned
+                startThreeBallSequence();
+            } else if (threeBallSequenceActive || shootSequenceActive) {
+                // If a sequence is active, stop it
+                stopThreeBallSequence();
                 stopShootSequence();
             }
         }
@@ -661,8 +703,13 @@ public class Tele extends OpMode {
 
         // Shoot sequence starts automatically when bumpers are pressed to select color
 
-        if (shootSequenceActive) {
+        if (shootSequenceActive && !threeBallSequenceActive) {
             executeShootSequence();
+        }
+
+        // Execute 3-ball auto shoot sequence
+        if (threeBallSequenceActive) {
+            executeThreeBallSequence();
         }
 
         // Close transfer after 2.5 seconds if auto transfer was triggered
@@ -690,6 +737,16 @@ public class Tele extends OpMode {
             telemetry.addData("Aimed", isAimed ? "YES" : "NO");
         }
 
+        // AprilTag Pattern Scan Status (for 3-ball auto shoot)
+        telemetry.addData("--- PATTERN SCAN ---", "");
+        if (detectedAprilTagId != -1) {
+            telemetry.addData("Scanned Tag ID", detectedAprilTagId);
+            telemetry.addData("Ball Order", "" + ballOrder[0] + ballOrder[1] + ballOrder[2]);
+            telemetry.addData("3-Ball Ready", "Press RT to shoot!");
+        } else {
+            telemetry.addData("Scanned Tag ID", "None - Press A to scan");
+        }
+
         telemetry.addData("--- WEBCAM COLOR DETECTION ---", "");
         telemetry.addData("Left Camera", colorResult.leftColor);
         telemetry.addData("Right Camera", colorResult.rightColor);
@@ -710,6 +767,21 @@ public class Tele extends OpMode {
             telemetry.addData("Sequence Time", "%.1f sec", shootSequenceTimer.seconds());
             telemetry.addData("Distance Check", distanceCheckPassed ? "PASSED" : "WAITING...");
             telemetry.addData("Shot Fired", shotFired ? "YES" : "NO");
+        }
+
+        // 3-ball sequence status
+        if (threeBallSequenceActive) {
+            telemetry.addData("--- 3-BALL SEQUENCE ---", "ACTIVE");
+            telemetry.addData("Current Ball", (currentBallIndex + 1) + " of 3");
+            if (currentBallIndex < 3) {
+                telemetry.addData("Target Color", ballOrder[currentBallIndex] == 'P' ? "PURPLE" : "GREEN");
+            }
+            telemetry.addData("Shoot Timer", "%.2f sec", shootTimer.seconds());
+            telemetry.addData("Side Decided", shootSideDecided ? "YES" : "SCANNING...");
+            telemetry.addData("Distance Check", distanceCheckPassed ? "PASSED" : "WAITING...");
+            telemetry.addData("Shot Fired", shotFired ? "YES" : "NO");
+            telemetry.addData("Kick Left", kickLeft);
+            telemetry.addData("Kick Right", kickRight);
         }
 
         // Show what's needed to shoot
@@ -993,6 +1065,283 @@ public class Tele extends OpMode {
         // Reset kicker arms
         leftKickerArm.setPosition(0.0);
         rightKickerArm.setPosition(0.5);
+    }
+
+    /**
+     * Starts the 3-ball auto shoot sequence based on the scanned AprilTag pattern.
+     */
+    private void startThreeBallSequence() {
+        threeBallSequenceActive = true;
+        currentBallIndex = 0;
+        shootTimer.reset();
+        shotFired = false;
+        distanceCheckPassed = false;
+        shootSideDecided = false;
+        intakeReversed = false;
+        restartIntakePulseActive = false;
+        kickLeft = false;
+        kickRight = false;
+
+        // Enable shooter so PID control will run the motor to target RPM
+        shooterSpeedOn = true;
+
+        // Set default hood position and RPM if no tag is currently detected
+        if (!tagDetected || !autoAimEnabled) {
+            leftHoodPosition = 0.3;
+            leftHoodAdjustment.setPosition(leftHoodPosition);
+            double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
+            rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
+            rightHoodAdjustment.setPosition(rightHoodPosition);
+            targetShooterRPM = 2000.0;
+        }
+
+        // Set transfer to down (open) position for shooting
+        leftTransfer.setPosition(0.5);
+        rightTransfer.setPosition(0.0);
+        transfersUp = false;
+
+        // Reset kicker arms
+        leftKickerArm.setPosition(0.0);
+        rightKickerArm.setPosition(0.5);
+    }
+
+    /**
+     * Executes the 3-ball auto shoot sequence using the ball order from AprilTag scan.
+     * Similar logic to AutoShoot.java's executeShootSequence.
+     */
+    private void executeThreeBallSequence() {
+        if (currentBallIndex >= 3) {
+            // All 3 balls shot, end the sequence
+            stopThreeBallSequence();
+            return;
+        }
+
+        double rpmLowerBound = targetShooterRPM * (1.0 - RPM_TOLERANCE_PERCENT);
+        double rpmUpperBound = targetShooterRPM * (1.0 + RPM_TOLERANCE_PERCENT);
+        boolean rpmReady = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
+
+        // Determine which side to shoot from using webcam color detection
+        // Wait 300ms for ball to settle/intake to move it before scanning
+        if (!shootSideDecided && shootTimer.milliseconds() > 300) {
+            char targetColor = ballOrder[currentBallIndex];
+            boolean isThirdBall = (currentBallIndex == 2);
+
+            if (isThirdBall) {
+                // Third ball - open both trapdoors no matter what
+                kickLeft = true;
+                kickRight = true;
+            } else {
+                // Use webcam color detection to find the ball
+                ColorRegionProcessor.AnalysisResult colorResult = colorProcessor.getAnalysis();
+                String leftColor = colorResult.leftColor;
+                String rightColor = colorResult.rightColor;
+
+                boolean leftMatchesTarget = false;
+                boolean rightMatchesTarget = false;
+
+                if (targetColor == 'P') {
+                    leftMatchesTarget = leftColor.equals("PURPLE");
+                    rightMatchesTarget = rightColor.equals("PURPLE");
+                } else { // targetColor == 'G'
+                    leftMatchesTarget = leftColor.equals("GREEN");
+                    rightMatchesTarget = rightColor.equals("GREEN");
+                }
+
+                // Determine which side to kick based on color detection
+                if (leftMatchesTarget && !rightMatchesTarget) {
+                    kickLeft = true;
+                    kickRight = false;
+                } else if (rightMatchesTarget && !leftMatchesTarget) {
+                    kickLeft = false;
+                    kickRight = true;
+                } else if (leftMatchesTarget && rightMatchesTarget) {
+                    // Both sides have target color - prioritize left
+                    kickLeft = true;
+                    kickRight = false;
+                } else {
+                    // No color detected - open both trapdoors
+                    kickLeft = true;
+                    kickRight = true;
+                }
+            }
+
+            shootSideDecided = true;
+            intakePulseTimer.reset();
+
+            // Open appropriate trapdoor
+            if (kickLeft && kickRight) {
+                leftTrapdoor.setPosition(0.2);   // Open
+                rightTrapdoor.setPosition(0.0);  // Open
+                bothTrapdoorsOpen = true;
+                leftTrapdoorOpen = true;
+                rightTrapdoorOpen = true;
+            } else if (kickLeft) {
+                // Ball is on LEFT side, open RIGHT trapdoor
+                leftTrapdoor.setPosition(0.0);   // Closed
+                rightTrapdoor.setPosition(0.0);  // Open
+                leftTrapdoorOpen = false;
+                rightTrapdoorOpen = true;
+            } else {
+                // Ball is on RIGHT side, open LEFT trapdoor
+                leftTrapdoor.setPosition(0.2);   // Open
+                rightTrapdoor.setPosition(0.2);  // Closed
+                leftTrapdoorOpen = true;
+                rightTrapdoorOpen = false;
+            }
+        }
+
+        // Handle restart intake pulse completion
+        if (restartIntakePulseActive && restartIntakePulseTimer.milliseconds() >= 150) {
+            intake.setPower(-1.0);
+            restartIntakePulseActive = false;
+            // Set transfer DOWN
+            leftTransfer.setPosition(0.5);
+            rightTransfer.setPosition(0.0);
+            transfersUp = false;
+        }
+
+        // Pulse intake while waiting for distance check: -1 for 250ms, 0 for 250ms
+        if (!restartIntakePulseActive && !distanceCheckPassed) {
+            long pulsePhase = (long) intakePulseTimer.milliseconds() % 500;
+            if (pulsePhase < 250) {
+                intake.setPower(-1.0);
+            } else {
+                intake.setPower(0.0);
+            }
+        }
+
+        // Continuous distance check (starts after 200ms for trapdoor movement)
+        if (shootTimer.milliseconds() >= 200 && !distanceCheckPassed) {
+            double distance = distanceSensor.getDistance(DistanceUnit.CM);
+            if (distance < 20 && rpmReady) {
+                distanceCheckPassed = true;
+
+                leftTransfer.setPosition(0.0);   // UP
+                rightTransfer.setPosition(0.5);  // UP
+                transfersUp = true;
+                intake.setPower(-1.0);
+                intakeReversed = false;
+                transferTimer.reset();
+
+                // Close both trapdoors
+                leftTrapdoor.setPosition(0.1);
+                rightTrapdoor.setPosition(0.1);
+                leftTrapdoorOpen = false;
+                rightTrapdoorOpen = false;
+                bothTrapdoorsOpen = false;
+
+                // Shot is being fired
+                shotFired = true;
+                shotFiredTimer.reset();
+            }
+        }
+
+        // After 50ms, set intake to -1.0
+        if (distanceCheckPassed && !intakeReversed && transferTimer.milliseconds() >= 50) {
+            intake.setPower(-1.0);
+            intakeReversed = true;
+        }
+
+        // Timeout safety (1.5 seconds)
+        if (shootTimer.milliseconds() >= 1500 && !distanceCheckPassed) {
+            restartBallInSequence();
+            return;
+        }
+
+        // End sequence 750ms after firing - transfers go back down and next ball
+        if (shotFired && shotFiredTimer.milliseconds() >= 750) {
+            // Close trapdoors and reset kicker arms
+            leftTrapdoor.setPosition(0.1);
+            rightTrapdoor.setPosition(0.1);
+            leftKickerArm.setPosition(0.0);
+            rightKickerArm.setPosition(0.5);
+
+            // Transfer goes back down
+            leftTransfer.setPosition(0.5);
+            rightTransfer.setPosition(0.0);
+
+            leftTrapdoorOpen = false;
+            rightTrapdoorOpen = false;
+            bothTrapdoorsOpen = false;
+            transfersUp = false;
+
+            // Move to next ball
+            currentBallIndex++;
+            shotFired = false;
+            distanceCheckPassed = false;
+            intakeReversed = false;
+            shootSideDecided = false;
+            restartIntakePulseActive = false;
+            kickLeft = false;
+            kickRight = false;
+            shootTimer.reset();
+        }
+    }
+
+    /**
+     * Restarts the current ball in the 3-ball sequence when distance sensor doesn't detect ball.
+     */
+    private void restartBallInSequence() {
+        shootTimer.reset();
+        distanceCheckPassed = false;
+        shotFired = false;
+        intakeReversed = false;
+
+        // Reopen trapdoors based on current kick settings
+        if (kickLeft && kickRight) {
+            leftTrapdoor.setPosition(0.2);
+            rightTrapdoor.setPosition(0.0);
+        } else if (kickLeft) {
+            leftTrapdoor.setPosition(0.0);
+            rightTrapdoor.setPosition(0.0);
+        } else if (kickRight) {
+            leftTrapdoor.setPosition(0.2);
+            rightTrapdoor.setPosition(0.2);
+        } else {
+            leftTrapdoor.setPosition(0.1);
+            rightTrapdoor.setPosition(0.1);
+        }
+
+        // Start intake pulse
+        intake.setPower(-1.0);
+        restartIntakePulseActive = true;
+        restartIntakePulseTimer.reset();
+
+        // Reset kicker arms
+        leftKickerArm.setPosition(0.0);
+        rightKickerArm.setPosition(0.5);
+    }
+
+    /**
+     * Stops the 3-ball auto shoot sequence.
+     */
+    private void stopThreeBallSequence() {
+        threeBallSequenceActive = false;
+        currentBallIndex = 0;
+        shootSideDecided = false;
+        distanceCheckPassed = false;
+        shotFired = false;
+        intakeReversed = false;
+        restartIntakePulseActive = false;
+        kickLeft = false;
+        kickRight = false;
+
+        // Reset servos to closed positions
+        leftTrapdoor.setPosition(0.1);
+        rightTrapdoor.setPosition(0.1);
+        rightTransfer.setPosition(0.0);  // DOWN position
+        leftTransfer.setPosition(0.5);   // DOWN position
+
+        // Stop intake
+        intake.setPower(0.0);
+
+        // Reset state variables to match physical state
+        leftTrapdoorOpen = false;
+        rightTrapdoorOpen = false;
+        bothTrapdoorsOpen = false;
+        leftKickerArmOpen = false;
+        rightKickerArmOpen = false;
+        transfersUp = false;
     }
 
     /**
