@@ -897,20 +897,20 @@ public class Tele extends OpMode {
         singleBallMode = false;
         trapdoorsOpenedForSingleBall = false;
 
-        if (kickLeft && kickRight) {
+        if (kickLeft && kickRight && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
             // Both trapdoors open
             leftTrapdoor.setPosition(0.2);   // Open
             rightTrapdoor.setPosition(0.0);  // Open
-        } else if (kickRight) {
+        } else if (kickRight && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
             // Left Trapdoor Open
             leftTrapdoor.setPosition(0.2);   // Open
             rightTrapdoor.setPosition(0.2);  // Closed
-        } else if (kickLeft) {
+        } else if (kickLeft && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
             // Right Trapdoor Open
             leftTrapdoor.setPosition(0.0);   // Closed
             rightTrapdoor.setPosition(0.0);  // Open
         } else {
-            // No selection, ensure closed
+            // No selection or ball already detected, ensure closed
             leftTrapdoor.setPosition(0.1);   // Closed
             rightTrapdoor.setPosition(0.1);  // Closed
         }
@@ -1077,24 +1077,24 @@ public class Tele extends OpMode {
         // that were originally determined until the ball passes the distance sensor check
 
         // Check if both sides should be kicked (both trapdoors open)
-        if (kickLeft && kickRight) {
+        if (kickLeft && kickRight && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
             leftTrapdoor.setPosition(0.2);  // Open
             rightTrapdoor.setPosition(0.0);  // Open
-        } else if (singleBallMode) {
+        } else if (singleBallMode && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
             // Single ball mode: open only left trapdoor
             leftTrapdoor.setPosition(0.2);  // Open
             rightTrapdoor.setPosition(0.1);  // Closed
-        } else if (kickLeft) {
+        } else if (kickLeft && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
             // Left side only (prioritized when both match)
             leftTrapdoor.setPosition(0.2);  // Open
             rightTrapdoor.setPosition(0.1);  // Closed
-        } else if (kickRight) {
+        } else if (kickRight && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
             // Right side
             rightTrapdoor.setPosition(0.1);  // Closed
             leftTrapdoor.setPosition(0.0);  // Open
         } else {
-            // No match (backup - use left side)
-            leftTrapdoor.setPosition(0.2);  // Open
+            // No match or ball already detected - ensure closed
+            leftTrapdoor.setPosition(0.1);  // Closed
             rightTrapdoor.setPosition(0.1);  // Closed
         }
 
@@ -1295,24 +1295,32 @@ public class Tele extends OpMode {
             intakePulseTimer.reset();
 
             // Open appropriate trapdoor
-            if (kickLeft && kickRight) {
+            // Open appropriate trapdoor (only if ball not yet detected)
+            if (kickLeft && kickRight && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
                 leftTrapdoor.setPosition(0.2);   // Open
                 rightTrapdoor.setPosition(0.0);  // Open
                 bothTrapdoorsOpen = true;
                 leftTrapdoorOpen = true;
                 rightTrapdoorOpen = true;
-            } else if (kickLeft) {
+            } else if (kickLeft && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
                 // Ball is on LEFT side, open RIGHT trapdoor
                 leftTrapdoor.setPosition(0.0);   // Closed
                 rightTrapdoor.setPosition(0.0);  // Open
                 leftTrapdoorOpen = false;
                 rightTrapdoorOpen = true;
-            } else {
+            } else if (kickRight && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
                 // Ball is on RIGHT side, open LEFT trapdoor
                 leftTrapdoor.setPosition(0.2);   // Open
                 rightTrapdoor.setPosition(0.2);  // Closed
                 leftTrapdoorOpen = true;
                 rightTrapdoorOpen = false;
+            } else {
+                // Ball already detected - keep closed
+                leftTrapdoor.setPosition(0.1);   // Closed
+                rightTrapdoor.setPosition(0.1);  // Closed
+                leftTrapdoorOpen = false;
+                rightTrapdoorOpen = false;
+                bothTrapdoorsOpen = false;
             }
         }
 
@@ -1346,7 +1354,7 @@ public class Tele extends OpMode {
             double distance = distanceSensor.getDistance(DistanceUnit.CM);
 
             // Ball detected - close trapdoors immediately (regardless of RPM)
-            if (distance < 20 && !ballDetectedWaitingForRpm) {
+            if (distance < 25 && !ballDetectedWaitingForRpm) {
                 // Close both trapdoors
                 leftTrapdoor.setPosition(0.1);
                 rightTrapdoor.setPosition(0.1);
@@ -1354,12 +1362,15 @@ public class Tele extends OpMode {
                 rightTrapdoorOpen = false;
                 bothTrapdoorsOpen = false;
                 ballDetectedWaitingForRpm = true;
+
+                // Clear kick flags immediately to prevent restart from reopening
+                kickLeft = false;
+                kickRight = false;
             }
 
             // Once ball detected and RPM is ready, proceed with transfers and intake
             if (ballDetectedWaitingForRpm && rpmReady) {
                 distanceCheckPassed = true;
-                ballDetectedWaitingForRpm = false;
 
                 leftTransfer.setPosition(0.0);   // UP
                 rightTransfer.setPosition(0.5);  // UP
@@ -1372,6 +1383,8 @@ public class Tele extends OpMode {
                 // Shot is being fired
                 shotFired = true;
                 shotFiredTimer.reset();
+                ballDetectedWaitingForRpm = false;
+
             }
         }
 
@@ -1422,18 +1435,22 @@ public class Tele extends OpMode {
         intakeReversed = false;
 
         // Reopen trapdoors based on current kick settings
-        if (kickLeft && kickRight) {
-            leftTrapdoor.setPosition(0.2);
-            rightTrapdoor.setPosition(0.0);
-        } else if (kickLeft) {
-            leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.0);
-        } else if (kickRight) {
-            leftTrapdoor.setPosition(0.2);
-            rightTrapdoor.setPosition(0.2);
-        } else {
-            leftTrapdoor.setPosition(0.1);
-            rightTrapdoor.setPosition(0.1);
+        // Reopen trapdoors based on current kick settings
+// CRITICAL: Only reopen if we haven't already detected a ball
+        if (!ballDetectedWaitingForRpm && !distanceCheckPassed) {
+            if (kickLeft && kickRight) {
+                leftTrapdoor.setPosition(0.2);
+                rightTrapdoor.setPosition(0.0);
+            } else if (kickLeft) {
+                leftTrapdoor.setPosition(0.0);
+                rightTrapdoor.setPosition(0.0);
+            } else if (kickRight) {
+                leftTrapdoor.setPosition(0.2);
+                rightTrapdoor.setPosition(0.2);
+            } else {
+                leftTrapdoor.setPosition(0.1);
+                rightTrapdoor.setPosition(0.1);
+            }
         }
 
         // Start intake pulse
