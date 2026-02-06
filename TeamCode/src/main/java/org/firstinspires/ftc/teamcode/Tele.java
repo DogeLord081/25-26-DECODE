@@ -99,7 +99,6 @@ public class Tele extends OpMode {
 
     // Auto-Aim toggle state (Right Trigger)
     private boolean autoAimEnabled = false;
-    private boolean lastGamepad1RightTriggerState = false;
 
     // ========== AUTO-AIM STATE ==========
     private double detectedDistance = 0.0;
@@ -417,11 +416,10 @@ public class Tele extends OpMode {
             }
         }
 
-        // Right Trigger (Toggle): Auto-Aim / Position
-        if (gamepad1.right_trigger > 0.5 && !lastGamepad1RightTriggerState) {
-            autoAimEnabled = !autoAimEnabled;
-        }
-        lastGamepad1RightTriggerState = gamepad1.right_trigger > 0.5;
+        //Right Trigger (Toggle): Auto-Aim / Position
+        //if (gamepad1.right_trigger > 0.5 ) {
+        //    autoAimEnabled = !autoAimEnabled;
+        // }
 
         // Apply auto-aim rotation to drive motors if enabled
         if (autoAimEnabled && tagDetected && !isAimed) {
@@ -494,7 +492,7 @@ public class Tele extends OpMode {
         }
         // Y Button: AUTO-AIM + SHOOT - Enable auto-aim and start 3-ball sequence
 // (Requires AprilTag to be scanned first with A button)
-        if (gamepad1.y && !lastGamepad1YState) {
+        if (gamepad1.y ) {
             // Only start if AprilTag pattern was already scanned
             if (detectedAprilTagId != -1) {
                 // Step 1: Enable auto-aim if not already enabled
@@ -508,7 +506,6 @@ public class Tele extends OpMode {
                 }
             }
         }
-        lastGamepad1YState = gamepad1.y;
         lastGamepad1AState = gamepad1.a;
 
         // ========== CONTROLLER 2: THE OPERATOR (Scoring Logic) ==========
@@ -1091,6 +1088,7 @@ public class Tele extends OpMode {
         leftKickerArmOpen = false;
         rightKickerArmOpen = false;
         transfersUp = false;  // Transfer ends in down position
+        shooterSpeedOn = false;
     }
 
     private void restartShootSequence() {
@@ -1454,7 +1452,7 @@ public class Tele extends OpMode {
             if (currentBallIndex >= 2) {
                 // Third ball just finished, stop the sequence
                 stopThreeBallSequence();
-                autoAimEnabled = false;
+
 
             }
 
@@ -1527,6 +1525,7 @@ public class Tele extends OpMode {
 
         // Stop intake
         intake.setPower(0.0);
+        shooter.setPower(0.0);
 
         // Reset state variables to match physical state
         leftTrapdoorOpen = false;
@@ -1535,6 +1534,13 @@ public class Tele extends OpMode {
         leftKickerArmOpen = false;
         rightKickerArmOpen = false;
         transfersUp = false;
+        autoAimEnabled = false;
+        tagDetected = false;
+
+        //turn off shooter
+        shooterSpeedOn = false;
+        shooterIntegral = 0.0;
+        shooterLastError = 0.0;
     }
 
     /**
