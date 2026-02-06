@@ -182,6 +182,7 @@ public class Tele extends OpMode {
     private int detectedAprilTagId = -1;
     private char[] ballOrder = new char[3];  // Ball order based on AprilTag (P = Purple/Left, G = Green/Right)
     private boolean lastGamepad1AState = false;
+    private boolean lastGamepad1YState = false;  // For auto-aim + shoot combo
 
     // 3-ball auto shoot sequence state
     private boolean threeBallSequenceActive = false;
@@ -265,10 +266,10 @@ public class Tele extends OpMode {
         rightBack.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         shooter.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
-        leftFront.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        leftBack.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        rightFront.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        rightBack.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+      //  leftFront.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+       // leftBack.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+       // rightFront.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+       // rightBack.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
         // Initialize velocity tracking for shooter
         velocityTimer.reset();
@@ -444,13 +445,13 @@ public class Tele extends OpMode {
 
         // --- Intake Controls (Controller 1) ---
         // Right Bumper: Intake Toggle (Press once to turn ON, press again to stop)
-        /*
+
         if (gamepad1.right_bumper && !lastGamepad1RightBumperState) {
             intakeToggleOn = !intakeToggleOn;
         }
         lastGamepad1RightBumperState = gamepad1.right_bumper;
 
-         */
+
 
         // Left Trigger (Hold): Intake IN - overrides toggle
         // Left Bumper: Intake OUT (Reverse/Unjam) - overrides toggle
@@ -464,6 +465,8 @@ public class Tele extends OpMode {
             // Only stop intake if no shoot sequence is active
             intake.setPower(0.0);
         }
+
+
 
         // A Button: Scan for AprilTag pattern (like in AutoShoot.java)
         if (gamepad1.a && !lastGamepad1AState) {
@@ -489,6 +492,23 @@ public class Tele extends OpMode {
                 }
             }
         }
+        // Y Button: AUTO-AIM + SHOOT - Enable auto-aim and start 3-ball sequence
+// (Requires AprilTag to be scanned first with A button)
+        if (gamepad1.y && !lastGamepad1YState) {
+            // Only start if AprilTag pattern was already scanned
+            if (detectedAprilTagId != -1) {
+                // Step 1: Enable auto-aim if not already enabled
+                if (!autoAimEnabled) {
+                    autoAimEnabled = true;
+                }
+
+                // Step 2: Start 3-ball sequence (same logic as gamepad2 RT)
+                if (!threeBallSequenceActive && !shootSequenceActive) {
+                    startThreeBallSequence();
+                }
+            }
+        }
+        lastGamepad1YState = gamepad1.y;
         lastGamepad1AState = gamepad1.a;
 
         // ========== CONTROLLER 2: THE OPERATOR (Scoring Logic) ==========
@@ -837,6 +857,14 @@ public class Tele extends OpMode {
         telemetry.addData("Distance (cm)", "%.2f", distanceSensor.getDistance(DistanceUnit.CM));
 
 
+        telemetry.addData("--- QUICK START ---", "");
+        if (detectedAprilTagId == -1) {
+            telemetry.addData("Step 1", "Press A to scan AprilTag");
+        } else {
+            telemetry.addData("Tag Scanned", "Ready! Press Y to auto-shoot");
+        }
+
+
         telemetry.update();
     }
 
@@ -1175,7 +1203,7 @@ public class Tele extends OpMode {
             // Wait time depends on which ball we're transitioning to:
             // After 1st ball (currentBallIndex=0) → wait 1500ms for 2nd ball
             // After 2nd ball (currentBallIndex=1) → wait 750ms for 3rd ball
-            double transferCycleWaitTime = (currentBallIndex == 0) ? 1800 : 750;
+            double transferCycleWaitTime = (currentBallIndex == 0) ? 600 : 300;
 
             // Once wait time elapsed: transfers are back down, now we can proceed to next ball
             if (transferCycleTimer.milliseconds() >= transferCycleWaitTime) {
@@ -1421,6 +1449,16 @@ public class Tele extends OpMode {
             waitingForTransferCycle = true;
             transferCycleTimer.reset();
             shotFired = false;  // Reset so we don't re-enter this block
+
+            // Check if this was the third ball - if so, exit the sequence immediately
+            if (currentBallIndex >= 2) {
+                // Third ball just finished, stop the sequence
+                stopThreeBallSequence();
+                autoAimEnabled = false;
+
+            }
+
+
         }
     }
 
