@@ -85,6 +85,7 @@ public class AutoShoot extends OpMode {
     private int currentBallIndex = 0;  // 0, 1, 2 for the three balls
     private boolean shotFired = false;
     private boolean distanceCheckPassed = false;
+    private boolean ballDetectedWaitingForRpm = false; // Ball detected, trapdoors closed, waiting for RPM
     private ElapsedTime shotFiredTimer = new ElapsedTime();
     private boolean shootSideDecided = false;
     private boolean kickLeft = false;
@@ -101,16 +102,22 @@ public class AutoShoot extends OpMode {
     private final Pose startPose = new Pose(26.63157142857142, 127.60802107728338, Math.toRadians(325));
     private final Pose scorePose = new Pose(52.328, 115.18032786885244, Math.toRadians(250));
     private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(320));
-    private final Pose afterShootPose = new Pose(41.55750819672132, 57.73770491803278, Math.toRadians(180));
-    private final Pose intakeBallsPose = new Pose(8.55750819672132, 57.73770491803278, Math.toRadians(180));
+    private final Pose afterShootPose = new Pose(54.55750819672132, 62.73770491803278, Math.toRadians(185));
+    private final Pose intakeBallsPose = new Pose(25.55750819672132, 62.73770491803278, Math.toRadians(185));
+    private final Pose afterShootPose2 = new Pose(54.55750819672132, 38.73770491803278, Math.toRadians(185));
+    private final Pose intakeBallsPose2 = new Pose(25.55750819672132, 38.73770491803278, Math.toRadians(185));
 
     /* Path declarations */
     private Path scorePreload;
     private Path afterScanPath;
     private Path afterShootPath;
+    private Path afterShootPath2;
     private Path intakeBallsPath;
+    private Path intakeBallsPath2;
     private Path returnToAfterShootPath;
+    private Path returnToAfterShootPath2;
     private Path returnToScanPath;
+    private Path returnToScanPath2;
 
     /* AprilTag scanning state */
     private int detectedAprilTagId = -1;
@@ -132,12 +139,25 @@ public class AutoShoot extends OpMode {
         returnToAfterShootPath = new Path(new BezierLine(intakeBallsPose, afterShootPose));
         returnToAfterShootPath.setLinearHeadingInterpolation(intakeBallsPose.getHeading(), afterShootPose.getHeading());
 
+        afterShootPath2 = new Path(new BezierLine(afterScanPose, afterShootPose2));
+        afterShootPath2.setLinearHeadingInterpolation(afterScanPose.getHeading(), afterShootPose2.getHeading());
+
+        intakeBallsPath2 = new Path(new BezierLine(afterShootPose2, intakeBallsPose2));
+        intakeBallsPath2.setLinearHeadingInterpolation(afterShootPose2.getHeading(), intakeBallsPose2.getHeading());
+
         returnToScanPath = new Path(new BezierCurve(
                 afterShootPose,
                 new Pose(55.0, 85.0, 0),
                 afterScanPose
         ));
         returnToScanPath.setLinearHeadingInterpolation(afterShootPose.getHeading(), afterScanPose.getHeading());
+
+        returnToScanPath2 = new Path(new BezierCurve(
+                afterShootPose2,
+                new Pose(55.0, 85.0, 0),
+                afterScanPose
+        ));
+        returnToScanPath2.setLinearHeadingInterpolation(afterShootPose2.getHeading(), afterScanPose.getHeading());
     }
 
     /** Main state machine for autonomous path progression **/
@@ -204,6 +224,7 @@ public class AutoShoot extends OpMode {
                     shootTimer.reset();
                     shotFired = false;
                     distanceCheckPassed = false;
+                    ballDetectedWaitingForRpm = false;
                     shootSideDecided = false;
 
                     setPathState(3);
@@ -254,7 +275,7 @@ public class AutoShoot extends OpMode {
             case 7:
                 // Wait for robot to reach intakeBallsPose
                 if (!follower.isBusy()) {
-                    intake.setPower(0);
+                    //intake.setPower(0);
                     // Start return trip
                     follower.followPath(returnToAfterShootPath);
 
@@ -263,6 +284,7 @@ public class AutoShoot extends OpMode {
                     shootTimer.reset();
                     shotFired = false;
                     distanceCheckPassed = false;
+                    ballDetectedWaitingForRpm = false;
                     shootSideDecided = false;
 
                     setPathState(8);
@@ -283,7 +305,7 @@ public class AutoShoot extends OpMode {
             case 9:
                 // Traveling back to afterScanPose
                 controlShooterPID();
-                executeShootSequence();
+                // executeShootSequence();
 
                 if (!follower.isBusy()) {
                     follower.holdPoint(afterScanPose);
@@ -375,7 +397,7 @@ public class AutoShoot extends OpMode {
 
         // Determine which side to shoot from using webcam color detection
         // Wait 300ms for ball to settle/intake to move it before scanning to prevent errors
-        if (!shootSideDecided && shootTimer.milliseconds() > 300) {
+        if (!shootSideDecided && shootTimer.milliseconds() > 400) {
             char targetColor = ballOrder[currentBallIndex];
             boolean isThirdBall = (currentBallIndex == 2);
 
@@ -421,23 +443,32 @@ public class AutoShoot extends OpMode {
             shootSideDecided = true;
             intakePulseTimer.reset();
 
-            // Open appropriate trapdoor and kicker arm
-            if (kickLeft && kickRight) {
+            // Open appropriate trapdoor and kicker arm (only if ball not yet detected)
+            if (kickLeft && kickRight && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
                 leftTrapdoor.setPosition(0.2);   // Open
                 rightTrapdoor.setPosition(0.0);  // Open
                 bothTrapdoorsOpen = true;
-            } else if (kickLeft) {
+                leftTrapdoorOpen = true;
+                rightTrapdoorOpen = true;
+            } else if (kickLeft && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
                 // Ball is on LEFT side, open RIGHT trapdoor
                 leftTrapdoor.setPosition(0.0);   // Closed
                 rightTrapdoor.setPosition(0.0);  // Open
                 leftTrapdoorOpen = false;
                 rightTrapdoorOpen = true;
-            } else {
+            } else if (kickRight && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
                 // Ball is on RIGHT side, open LEFT trapdoor
                 leftTrapdoor.setPosition(0.2);   // Open
                 rightTrapdoor.setPosition(0.2);  // Closed
                 leftTrapdoorOpen = true;
                 rightTrapdoorOpen = false;
+            } else {
+                // Ball already detected - keep closed
+                leftTrapdoor.setPosition(0.1);   // Closed
+                rightTrapdoor.setPosition(0.1);  // Closed
+                leftTrapdoorOpen = false;
+                rightTrapdoorOpen = false;
+                bothTrapdoorsOpen = false;
             }
         }
 
@@ -462,10 +493,24 @@ public class AutoShoot extends OpMode {
         }
 
         // Continuous distance check (starts after 200ms for trapdoor movement)
-        if (shootTimer.milliseconds() >= 200 && !distanceCheckPassed) {
+        if (!distanceCheckPassed) {
             double distance = distanceSensor.getDistance(DistanceUnit.CM);
-            if (distance < 20 & rpmReady) {
+
+            // Ball detected - close trapdoors immediately (regardless of RPM)
+            if (distance < 20 && !ballDetectedWaitingForRpm) {
+                // Close both trapdoors immediately
+                leftTrapdoor.setPosition(0.1);   // Closed
+                rightTrapdoor.setPosition(0.1);  // Closed
+                leftTrapdoorOpen = false;
+                rightTrapdoorOpen = false;
+                bothTrapdoorsOpen = false;
+                ballDetectedWaitingForRpm = true;
+            }
+
+            // Once ball detected and RPM is ready, proceed with transfers and intake
+            if (ballDetectedWaitingForRpm && rpmReady) {
                 distanceCheckPassed = true;
+                ballDetectedWaitingForRpm = false;
 
                 leftTransfer.setPosition(0.0);   // UP
                 rightTransfer.setPosition(0.5);  // UP
@@ -474,12 +519,6 @@ public class AutoShoot extends OpMode {
                 intakeReversed = false;
                 transferTimer.reset();
 
-                // Close both trapdoors
-                leftTrapdoor.setPosition(0.1);
-                rightTrapdoor.setPosition(0.1);
-                leftTrapdoorOpen = false;
-                rightTrapdoorOpen = false;
-                bothTrapdoorsOpen = false;
 
                 // Shot is being fired
                 shotFired = true;
@@ -538,6 +577,7 @@ public class AutoShoot extends OpMode {
             currentBallIndex++;
             shotFired = false;
             distanceCheckPassed = false;
+            ballDetectedWaitingForRpm = false;
             intakeReversed = false;
             shootSideDecided = false;
             restartIntakePulseActive = false;
@@ -551,6 +591,7 @@ public class AutoShoot extends OpMode {
     private void restartBallSequence() {
         shootTimer.reset();
         distanceCheckPassed = false;
+        ballDetectedWaitingForRpm = false;
         shotFired = false;
         intakeReversed = false;
 
@@ -700,8 +741,8 @@ public class AutoShoot extends OpMode {
         rightKickerArm.setPosition(0.5);
 
         // Set hood position for shooting
-        leftHoodAdjustment.setPosition(0.3);
-        rightHoodAdjustment.setPosition(0.0);
+        leftHoodAdjustment.setPosition(0.05);
+        rightHoodAdjustment.setPosition(0.25);
 
         // Initialize velocity timer
         velocityTimer.reset();
