@@ -16,7 +16,7 @@ import org.firstinspires.ftc.vision.VisionPortal;
 import org.firstinspires.ftc.teamcode.ColorDetectionTest.ColorRegionProcessor;
 
 
-@com.qualcomm.robotcore.eventloop.opmode.TeleOp (name = "Tele")
+@com.qualcomm.robotcore.eventloop.opmode.TeleOp (name = "TelePPG")
 public class TelePPG extends OpMode {
     protected DcMotor leftFront;
     protected DcMotor rightFront;
@@ -61,7 +61,7 @@ public class TelePPG extends OpMode {
     // Angle lookup: {angle (degrees), target X percent from left}
     private static final double[][] ANGLE_TO_TARGET_LOOKUP = {
             {45, 0.60},   // 45 degrees to the left → tag at 90% from left
-            {90, 0.60},   // Head on (90 degrees) → tag at 60% from left
+            {90, 0.65},   // Head on (90 degrees) → tag at 60% from left
             {135, 0.60}   // 45 degrees to the right → tag at 60% from left
     };
     private static final double AIM_TOLERANCE_PIXELS = 15.0;
@@ -71,17 +71,17 @@ public class TelePPG extends OpMode {
     private static final double MAX_SHOOTER_RPM = 4900.0;
     private static final double DUMP_RPM = 1000.0;  // Low RPM to dump wrong-color balls without scoring
     private static final double[][] SHOOTER_LOOKUP_TABLE = {
-            {18, 0.05, 1800},
-            {24, 0.05, 1800},
-            {30, 0.05, 1800},
-            {36, 0.30, 1800},
-            {42, 0.30, 1800},
-            {48, 0.20, 1850},
-            {54, 0.30, 1850},
-            {60, 0.30, 1900},
-            {66, 0.30, 2000},
-            {72, 0.30, 2050},
-            {118, 0.30, 2250}
+            {18, 0.05, 1600},
+            {24, 0.05, 1650},
+            {30, 0.05, 1700},
+            {36, 0.05, 1750},
+            {42, 0.05, 1800},
+            {48, 0.05, 1850},
+            {54, 0.05, 1900},
+            {60, 0.05, 1975},
+            {66, 0.05, 2100},
+            {72, 0.05, 2150},
+            {118, 0, 2750}
     };
 
     // Shooter PID constants
@@ -100,12 +100,8 @@ public class TelePPG extends OpMode {
     // Auto-Aim toggle state (Right Trigger)
     private boolean autoAimEnabled = false;
 
-    // ========== AUTO-AIM STATE ==========
-    private double detectedDistance = 0.0;
-    private int detectedTagX = -1;
     private boolean tagDetected = false;
     private double autoAimRotation = 0.0;
-    private boolean isAimed = false;
     private double approachAngle = 90.0;
     private int targetXPixels = HUSKYLENS_WIDTH / 2;
 
@@ -114,10 +110,9 @@ public class TelePPG extends OpMode {
     private double shooterPower = 0.0;
     private double shooterRPM = 0.0;
     private int lastShooterEncoderPosition = 0;
-    private ElapsedTime velocityTimer = new ElapsedTime();
+    private final ElapsedTime velocityTimer = new ElapsedTime();
     private double shooterIntegral = 0.0;
     private double shooterLastError = 0.0;
-    private boolean encoderWorking = true;  // Tracks if shooter encoder is functioning
 
     // Hood adjustment positions
     private double leftHoodPosition = 0.15;
@@ -160,9 +155,9 @@ public class TelePPG extends OpMode {
     private boolean lastGamepad2RightTriggerState = false;
 
     // Timer for shooting sequence
-    private ElapsedTime shootSequenceTimer = new ElapsedTime();
-    private ElapsedTime transferTimer = new ElapsedTime();
-    private ElapsedTime shotFiredTimer = new ElapsedTime();  // Timer for after shot is fired
+    private final ElapsedTime shootSequenceTimer = new ElapsedTime();
+    private final ElapsedTime transferTimer = new ElapsedTime();
+    private final ElapsedTime shotFiredTimer = new ElapsedTime();  // Timer for after shot is fired
     private boolean shootSequenceActive = false;
     private boolean autoTransferTriggered = false;  // For RPM-based auto transfer
     private boolean distanceCheckPassed = false; // Tracks if ball was detected at 3000ms
@@ -170,8 +165,8 @@ public class TelePPG extends OpMode {
     private boolean shotFired = false;  // Tracks if the transfer was opened (shot fired)
     private boolean intakeReversed = false; // Tracks if intake was reversed after distance check
     private boolean restartIntakePulseActive = false; // Tracks if restart intake pulse is in progress
-    private ElapsedTime restartIntakePulseTimer = new ElapsedTime(); // Timer for restart intake pulse
-    private ElapsedTime intakePulseTimer = new ElapsedTime(); // Timer for intake pulsing during shoot sequence
+    private final ElapsedTime restartIntakePulseTimer = new ElapsedTime(); // Timer for restart intake pulse
+    private final ElapsedTime intakePulseTimer = new ElapsedTime(); // Timer for intake pulsing during shoot sequence
     private boolean kickLeft = false; // Track if left side should be kicked
     private boolean kickRight = false; // Track if right side should be kicked
     private boolean singleBallMode = false; // True if proximity > 6.5 (only one ball)
@@ -181,21 +176,16 @@ public class TelePPG extends OpMode {
     private int detectedAprilTagId = -1;
     private char[] ballOrder = {'P','P','G'};  // Ball order based on AprilTag (P = Purple/Left, G = Green/Right)
     private boolean lastGamepad1AState = false;
-    private boolean lastGamepad1YState = false;  // For auto-aim + shoot combo
 
     // 3-ball auto shoot sequence state
     private boolean threeBallSequenceActive = false;
     private int currentBallIndex = 0;  // 0, 1, 2 for the three balls
     private boolean shootSideDecided = false;
-    private ElapsedTime shootTimer = new ElapsedTime();
+    private final ElapsedTime shootTimer = new ElapsedTime();
     private boolean dumpMode = false;  // True when shooting wrong-color ball at low RPM
     private double currentTargetRPM = 0.0;  // Current target RPM for 3-ball sequence
     private boolean waitingForTransferCycle = false;  // True when waiting for transfers to go up and back down
-    private ElapsedTime transferCycleTimer = new ElapsedTime();  // Timer for transfer cycle
-
-    // Debug timing
-    private ElapsedTime debugTimer = new ElapsedTime();
-
+    private final ElapsedTime transferCycleTimer = new ElapsedTime();  // Timer for transfer cycle
 
     @Override
     public void init() {
@@ -333,17 +323,18 @@ public class TelePPG extends OpMode {
         rightBackPower = (float) Range.clip(rightBackPower, -1.0, 1.0);
 
         // Apply motor correction multipliers to compensate for motor imbalances
-        rightFrontPower *= RF_MULTIPLIER;
-        leftFrontPower *= LF_MULTIPLIER;
-        leftBackPower *= LB_MULTIPLIER;
-        rightBackPower *= RB_MULTIPLIER;
+        rightFrontPower *= (float) RF_MULTIPLIER;
+        leftFrontPower *= (float) LF_MULTIPLIER;
+        leftBackPower *= (float) LB_MULTIPLIER;
+        rightBackPower *= (float) RB_MULTIPLIER;
 
         // ========== HUSKYLENS APRILTAG DETECTION & AUTO-AIM ==========
         HuskyLens.Block[] blocks = huskyLens.blocks();
         tagDetected = false;
-        detectedDistance = 0.0;
-        detectedTagX = -1;
-        isAimed = false;
+        // ========== AUTO-AIM STATE ==========
+        double detectedDistance = 0.0;
+        int detectedTagX = -1;
+        boolean isAimed = false;
 
         if (blocks.length > 0) {
             // Use the first detected tag
@@ -477,20 +468,20 @@ public class TelePPG extends OpMode {
         }
         // Y Button: AUTO-AIM + SHOOT - Enable auto-aim and start 3-ball sequence
 // (Requires AprilTag to be scanned first with A button)
-        if (gamepad1.y ) {
+        if (gamepad1.right_trigger > 0.5 ) {
             // Only start if AprilTag pattern was already scanned
             //if (detectedAprilTagId != -1) {
-                // Step 1: Enable auto-aim if not already enabled
-                if (!autoAimEnabled) {
-                    autoAimEnabled = true;
-                }
-
-                // Step 2: Start 3-ball sequence (same logic as gamepad2 RT)
-                if (!threeBallSequenceActive && !shootSequenceActive) {
-                    startThreeBallSequence();
-                }
+            // Step 1: Enable auto-aim if not already enabled
+            if (!autoAimEnabled) {
+                autoAimEnabled = true;
             }
-       // }
+
+            // Step 2: Start 3-ball sequence (same logic as gamepad2 RT)
+            if (!threeBallSequenceActive && !shootSequenceActive) {
+                startThreeBallSequence();
+            }
+        }
+        // }
         lastGamepad1AState = gamepad1.a;
 
         // ========== CONTROLLER 2: THE OPERATOR (Scoring Logic) ==========
@@ -666,7 +657,8 @@ public class TelePPG extends OpMode {
         }
 
         // Detect if encoder is not working (RPM stays 0 while motor is powered)
-        encoderWorking = !(shooterPower > 0.3 && shooterRPM < 100 && velocityTimer.seconds() > 0.5);
+        // Tracks if shooter encoder is functioning
+        boolean encoderWorking = !(shooterPower > 0.3 && shooterRPM < 100 && velocityTimer.seconds() > 0.5);
 
         if (effectiveTargetRPM > 0) {
             if (encoderWorking) {
@@ -852,10 +844,6 @@ public class TelePPG extends OpMode {
 
     // ========== PLACEHOLDER FUNCTIONS (TODO: Implement) ==========
 
-    // private void autoAimToTarget() {
-    //     // TODO: Use camera/AprilTag to center on target and strafe to correct distance
-    // }
-
     private void startShootSequence() {
         shootSequenceActive = true;
         shootSequenceTimer.reset();
@@ -890,14 +878,11 @@ public class TelePPG extends OpMode {
         // If no color detected on either side (both NEITHER), open both trapdoors
         if (leftMatchesSelected && !rightMatchesSelected) {
             kickLeft = true;
-            kickRight = false;
         } else if (rightMatchesSelected && !leftMatchesSelected) {
-            kickLeft = false;
             kickRight = true;
-        } else if (leftMatchesSelected && rightMatchesSelected) {
+        } else if (leftMatchesSelected) {
             // Both sides have the selected color - prioritize left
             kickLeft = true;
-            kickRight = false;
         } else {
             // No color detected on either side (both NEITHER) - open both trapdoors
             kickLeft = true;
@@ -1062,8 +1047,6 @@ public class TelePPG extends OpMode {
         leftTransfer.setPosition(0.5);   // DOWN position
 
         // Stop motors
-        // shooter.setPower(0.0);
-        // shooterSpeedOn = false;  // Turn off shooter speed toggle
         intake.setPower(0.0);
 
         // Reset state variables to match physical state
@@ -1088,18 +1071,18 @@ public class TelePPG extends OpMode {
         // that were originally determined until the ball passes the distance sensor check
 
         // Check if both sides should be kicked (both trapdoors open)
-        if (kickLeft && kickRight && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
+        if (kickLeft && kickRight) {
             leftTrapdoor.setPosition(0.2);  // Open
             rightTrapdoor.setPosition(0.0);  // Open
-        } else if (singleBallMode && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
+        } else if (singleBallMode) {
             // Single ball mode: open only left trapdoor
             leftTrapdoor.setPosition(0.2);  // Open
             rightTrapdoor.setPosition(0.1);  // Closed
-        } else if (kickLeft && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
+        } else if (kickLeft) {
             // Left side only (prioritized when both match)
             leftTrapdoor.setPosition(0.2);  // Open
             rightTrapdoor.setPosition(0.1);  // Closed
-        } else if (kickRight && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
+        } else if (kickRight) {
             // Right side
             rightTrapdoor.setPosition(0.1);  // Closed
             leftTrapdoor.setPosition(0.0);  // Open
@@ -1186,7 +1169,7 @@ public class TelePPG extends OpMode {
             // Wait time depends on which ball we're transitioning to:
             // After 1st ball (currentBallIndex=0) → wait 1500ms for 2nd ball
             // After 2nd ball (currentBallIndex=1) → wait 750ms for 3rd ball
-            double transferCycleWaitTime = (currentBallIndex == 0) ? 600 : 300;
+            double transferCycleWaitTime = 600;
 
             // Once wait time elapsed: transfers are back down, now we can proceed to next ball
             if (transferCycleTimer.milliseconds() >= transferCycleWaitTime) {
@@ -1268,7 +1251,7 @@ public class TelePPG extends OpMode {
                     if (leftMatchesTarget && !rightMatchesTarget) {
                         kickLeft = true;
                         kickRight = false;
-                    } else if (rightMatchesTarget && !leftMatchesTarget) {
+                    } else if (!leftMatchesTarget) {
                         kickLeft = false;
                         kickRight = true;
                     } else {
@@ -1285,7 +1268,7 @@ public class TelePPG extends OpMode {
                     if (leftHasWrongColor && !rightHasWrongColor) {
                         kickLeft = true;
                         kickRight = false;
-                    } else if (rightHasWrongColor && !leftHasWrongColor) {
+                    } else if (!leftHasWrongColor) {
                         kickLeft = false;
                         kickRight = true;
                     } else {
@@ -1458,20 +1441,18 @@ public class TelePPG extends OpMode {
         // Reopen trapdoors based on current kick settings
         // Reopen trapdoors based on current kick settings
 // CRITICAL: Only reopen if we haven't already detected a ball
-        if (!ballDetectedWaitingForRpm && !distanceCheckPassed) {
-            if (kickLeft && kickRight) {
-                leftTrapdoor.setPosition(0.2);
-                rightTrapdoor.setPosition(0.0);
-            } else if (kickLeft) {
-                leftTrapdoor.setPosition(0.0);
-                rightTrapdoor.setPosition(0.0);
-            } else if (kickRight) {
-                leftTrapdoor.setPosition(0.2);
-                rightTrapdoor.setPosition(0.2);
-            } else {
-                leftTrapdoor.setPosition(0.1);
-                rightTrapdoor.setPosition(0.1);
-            }
+        if (kickLeft && kickRight) {
+            leftTrapdoor.setPosition(0.2);
+            rightTrapdoor.setPosition(0.0);
+        } else if (kickLeft) {
+            leftTrapdoor.setPosition(0.0);
+            rightTrapdoor.setPosition(0.0);
+        } else if (kickRight) {
+            leftTrapdoor.setPosition(0.2);
+            rightTrapdoor.setPosition(0.2);
+        } else {
+            leftTrapdoor.setPosition(0.1);
+            rightTrapdoor.setPosition(0.1);
         }
 
         // Start intake pulse

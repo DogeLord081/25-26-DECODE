@@ -3,6 +3,7 @@ package org.firstinspires.ftc.teamcode;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.util.Range;
+import com.qualcomm.robotcore.util.ElapsedTime;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
@@ -28,10 +29,21 @@ public class LUTTest extends OpMode {
     private static final double LB_MULTIPLIER = 1.0;            // = 1.0
     private static final double RB_MULTIPLIER = 0.3425 / 0.41;  // ≈ 0.8354
 
-    // Shooter speed
-    private double shooterSpeed = 0.0;
-    private boolean lastGamepad1RightBumperState = false;
-    private boolean lastGamepad1LeftBumperState = false;
+    // Shooter PID Constants
+    private static final double kP = 0.0015;
+    private static final double kI = 0.00001;
+    private static final double kD = 0.00001;
+    private static final double kF = 1.0 / 4900.0;  // Feedforward based on max RPM
+    private static final double TICKS_PER_REV = 28.0;
+
+    // Shooter state
+    private double targetRPM = 0.0;
+    private double shooterRPM = 0.0;
+    private double shooterPower = 0.0;
+    private int lastEncoderPosition = 0;
+    private ElapsedTime velocityTimer = new ElapsedTime();
+    private double lastError = 0.0;
+    private double integralSum = 0.0;
 
     // Hood adjustment positions
     private double leftHoodPosition = 0.15;
@@ -40,6 +52,8 @@ public class LUTTest extends OpMode {
     private boolean lastDpadLeftState = false;
     private boolean transfersOpen = false;
     private boolean lastGamepad2AState = false;
+    private boolean lastGamepad1RightBumperState = false;
+    private boolean lastGamepad1LeftBumperState = false;
 
 
     @Override
@@ -70,10 +84,10 @@ public class LUTTest extends OpMode {
 
         // Set motor directions
         leftFront.setDirection(DcMotor.Direction.REVERSE);
-        leftBack.setDirection(DcMotor.Direction.REVERSE);
+        leftBack.setDirection(DcMotor.Direction.FORWARD);
         shooter.setDirection(DcMotor.Direction.REVERSE);
         rightFront.setDirection(DcMotor.Direction.FORWARD);
-        rightBack.setDirection(DcMotor.Direction.FORWARD);
+        rightBack.setDirection(DcMotor.Direction.REVERSE);
 
         rightFront.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         rightBack.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
@@ -84,6 +98,14 @@ public class LUTTest extends OpMode {
         leftBack.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         rightFront.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         rightBack.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+
+        // Initialize shooter encoder
+        shooter.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        shooter.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+
+        // Initialize velocity timer
+        velocityTimer.reset();
+        lastEncoderPosition = 0;
 
         // Set hood adjustments to initial position
         leftHoodAdjustment.setPosition(leftHoodPosition);
@@ -155,18 +177,45 @@ public class LUTTest extends OpMode {
 
         // Right Bumper: Increase shooter speed by 0.5
         if (gamepad1.right_bumper && !lastGamepad1RightBumperState) {
-            shooterSpeed = Range.clip(shooterSpeed + 0.05, 0.0, 1.0);
+            targetRPM = Range.clip(targetRPM + 50.0, 0.0, 5700.0);
         }
         lastGamepad1RightBumperState = gamepad1.right_bumper;
 
         // Left Bumper: Decrease shooter speed by 0.5
         if (gamepad1.left_bumper && !lastGamepad1LeftBumperState) {
-            shooterSpeed = Range.clip(shooterSpeed - 0.05, 0.0, 1.0);
+            targetRPM = Range.clip(targetRPM - 50.0, 0.0, 5700.0);
         }
         lastGamepad1LeftBumperState = gamepad1.left_bumper;
 
-        // Set shooter power
-        shooter.setPower(shooterSpeed);
+        // ========== SHOOTER PID CONTROL ==========
+
+        // Calculate shooter RPM
+        int currentPosition = shooter.getCurrentPosition();
+        double deltaTime = velocityTimer.seconds();
+
+        if (deltaTime > 0.02) {  // Update every 20ms
+            int deltaTicks = currentPosition - lastEncoderPosition;
+            double ticksPerSecond = Math.abs(deltaTicks / deltaTime);
+            shooterRPM = (ticksPerSecond / TICKS_PER_REV) * 60.0;
+
+            // Calculate PID output
+            double error = targetRPM - shooterRPM;
+            integralSum += error * deltaTime;
+            double derivative = (error - lastError) / deltaTime;
+
+            // Feedforward + PID
+            double feedforward = targetRPM * kF;
+            double pidOutput = (kP * error) + (kI * integralSum) + (kD * derivative);
+            shooterPower = Range.clip(feedforward + pidOutput, 0.0, 1.0);
+
+            // Set shooter power
+            shooter.setPower(shooterPower);
+
+            // Update variables for next loop
+            lastError = error;
+            lastEncoderPosition = currentPosition;
+            velocityTimer.reset();
+        }
 
         // ========== HOOD ADJUSTMENT CONTROL (Controller 1 D-Pad) ==========
 
@@ -189,7 +238,9 @@ public class LUTTest extends OpMode {
         lastDpadLeftState = gamepad1.dpad_left;
 
         // ========== TELEMETRY ==========
-        telemetry.addData("Shooter Speed", "%.2f", shooterSpeed);
+        telemetry.addData("Shooter Target RPM", "%.2f", targetRPM);
+        telemetry.addData("Shooter Actual RPM", "%.2f", shooterRPM);
+        telemetry.addData("Shooter Power", "%.2f", shooterPower);
         telemetry.addData("Left Hood Position", "%.2f", leftHoodPosition);
         telemetry.addData("Right Hood Position", "%.2f", rightHoodPosition);
         telemetry.update();
