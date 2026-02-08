@@ -102,10 +102,10 @@ public class AutoCloseBlue extends OpMode {
     private final Pose startPose = new Pose(26.63157142857142, 127.60802107728338, Math.toRadians(325));
     private final Pose scorePose = new Pose(52.328, 115.18032786885244, Math.toRadians(250));
     private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(320));
-    private final Pose afterShootPose = new Pose(54.55750819672132, 58, Math.toRadians(160));
-    private final Pose intakeBallsPose = new Pose(22.55750819672132, 55, Math.toRadians(190));
+    private final Pose afterShootPose = new Pose(54.55750819672132, 59, Math.toRadians(160));
+    private final Pose intakeBallsPose = new Pose(24.55750819672132, 59, Math.toRadians(200));
     private final Pose afterShootPose2 = new Pose(54.55750819672132, 38.73770491803278, Math.toRadians(160));
-    private final Pose intakeBallsPose2 = new Pose(22.55750819672132, 35.73770491803278, Math.toRadians(190));
+    private final Pose intakeBallsPose2 = new Pose(24.55750819672132, 35.73770491803278, Math.toRadians(200));
 
     /* Path declarations */
     private Path scorePreload;
