@@ -20,8 +20,8 @@ import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
 import org.firstinspires.ftc.vision.VisionPortal;
 import org.firstinspires.ftc.teamcode.ColorDetectionTest.ColorRegionProcessor;
 
-@Autonomous(name = "DECODE 25-26 AutoShoot")
-public class AutoShoot extends OpMode {
+@Autonomous(name = "DECODE 25-26 AutoCloseBlue")
+public class AutoCloseBlue extends OpMode {
 
     private Follower follower;
     private Timer pathTimer, opmodeTimer;
@@ -102,10 +102,10 @@ public class AutoShoot extends OpMode {
     private final Pose startPose = new Pose(26.63157142857142, 127.60802107728338, Math.toRadians(325));
     private final Pose scorePose = new Pose(52.328, 115.18032786885244, Math.toRadians(250));
     private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(320));
-    private final Pose afterShootPose = new Pose(54.55750819672132, 62.73770491803278, Math.toRadians(185));
-    private final Pose intakeBallsPose = new Pose(25.55750819672132, 62.73770491803278, Math.toRadians(185));
-    private final Pose afterShootPose2 = new Pose(54.55750819672132, 38.73770491803278, Math.toRadians(185));
-    private final Pose intakeBallsPose2 = new Pose(25.55750819672132, 38.73770491803278, Math.toRadians(185));
+    private final Pose afterShootPose = new Pose(54.55750819672132, 58, Math.toRadians(160));
+    private final Pose intakeBallsPose = new Pose(22.55750819672132, 55, Math.toRadians(190));
+    private final Pose afterShootPose2 = new Pose(54.55750819672132, 38.73770491803278, Math.toRadians(160));
+    private final Pose intakeBallsPose2 = new Pose(22.55750819672132, 35.73770491803278, Math.toRadians(190));
 
     /* Path declarations */
     private Path scorePreload;
@@ -267,6 +267,7 @@ public class AutoShoot extends OpMode {
                 if (!follower.isBusy()) {
                     // Turn on intake to pick up balls
                     intake.setPower(-1.0);
+                    // Use slow speed for intake path (half speed)
                     follower.followPath(intakeBallsPath);
                     setPathState(7);
                 }
@@ -276,6 +277,7 @@ public class AutoShoot extends OpMode {
                 // Wait for robot to reach intakeBallsPose
                 if (!follower.isBusy()) {
                     //intake.setPower(0);
+                    // Reset to normal speed for return trip
                     // Start return trip
                     follower.followPath(returnToAfterShootPath);
 

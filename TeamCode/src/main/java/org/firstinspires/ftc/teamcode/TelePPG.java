@@ -457,13 +457,11 @@ public class TelePPG extends OpMode {
 
 
 
-        // A Button: Scan for AprilTag pattern (like in AutoShoot.java)
+        // A Button: Stop 3-ball sequence if running, otherwise scan for AprilTag pattern
         if (gamepad1.a && !lastGamepad1AState) {
-            HuskyLens.Block[] aprilTagBlocks = huskyLens.blocks();
-            if (aprilTagBlocks.length > 0) {
-                detectedAprilTagId = aprilTagBlocks[0].id;
-                // Set ball order based on AprilTag ID
-                // ID 1: PPG, ID 2: PGP, ID 3: GPP
+            if (threeBallSequenceActive) {
+                // Stop the three ball sequence
+                stopThreeBallSequence();
             }
         }
         // Y Button: AUTO-AIM + SHOOT - Enable auto-aim and start 3-ball sequence
@@ -707,7 +705,7 @@ public class TelePPG extends OpMode {
         double rpmUpperBound = targetShooterRPM * (1.0 + RPM_TOLERANCE_PERCENT);
         boolean rpmInRange = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
 
-        // Right Trigger: Start 3-ball auto shoot sequence (like in AutoShoot.java)
+        // Right Trigger: Start 3-ball auto shoot sequence (like in AutoCloseBlue.java)
         boolean rightTriggerPressed = gamepad2.right_trigger > 0.5;
         if (rightTriggerPressed && !lastGamepad2RightTriggerState) {
             if (!threeBallSequenceActive && !shootSequenceActive && detectedAprilTagId != -1) {
@@ -1148,7 +1146,7 @@ public class TelePPG extends OpMode {
 
     /**
      * Executes the 3-ball auto shoot sequence using the ball order from AprilTag scan.
-     * Similar logic to AutoShoot.java's executeShootSequence.
+     * Similar logic to AutoCloseBlue.java's executeShootSequence.
      */
     private void executeThreeBallSequence() {
         if (currentBallIndex >= 3) {

@@ -447,7 +447,7 @@ public class Tele extends OpMode {
 
 
 
-        // A Button: Scan for AprilTag pattern (like in AutoShoot.java)
+        // A Button: Scan for AprilTag pattern (like in AutoCloseBlue.java)
         if (gamepad1.a && !lastGamepad1AState) {
             HuskyLens.Block[] aprilTagBlocks = huskyLens.blocks();
             if (aprilTagBlocks.length > 0) {
@@ -711,7 +711,7 @@ public class Tele extends OpMode {
         double rpmUpperBound = targetShooterRPM * (1.0 + RPM_TOLERANCE_PERCENT);
         boolean rpmInRange = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
 
-        // Right Trigger: Start 3-ball auto shoot sequence (like in AutoShoot.java)
+        // Right Trigger: Start 3-ball auto shoot sequence (like in AutoCloseBlue.java)
         boolean rightTriggerPressed = gamepad2.right_trigger > 0.5;
         if (rightTriggerPressed && !lastGamepad2RightTriggerState) {
             if (!threeBallSequenceActive && !shootSequenceActive && detectedAprilTagId != -1) {
@@ -1147,7 +1147,7 @@ public class Tele extends OpMode {
 
     /**
      * Executes the 3-ball auto shoot sequence using the ball order from AprilTag scan.
-     * Similar logic to AutoShoot.java's executeShootSequence.
+     * Similar logic to AutoCloseBlue.java's executeShootSequence.
      */
     private void executeThreeBallSequence() {
         if (currentBallIndex >= 3) {
