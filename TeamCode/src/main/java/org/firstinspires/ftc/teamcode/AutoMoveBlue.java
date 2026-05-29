@@ -55,27 +55,6 @@ public class AutoMoveBlue extends LinearOpMode {
 
             // Stop motors
             stopMotors();
-            sleep(500);  // Brief pause between movements
-
-            // Move LEFT at half power for 2 seconds
-            telemetry.addData("Status", "Moving LEFT");
-            telemetry.update();
-
-            // Strafe left: LF backward, RF forward, LB forward, RB backward
-            leftFront.setPower(-0.5);
-            rightFront.setPower(0.5);
-            leftBack.setPower(0.5);
-            rightBack.setPower(-0.5);
-
-            timer.reset();
-            while (opModeIsActive() && timer.seconds() < 2.0) {
-                telemetry.addData("Status", "Moving LEFT");
-                telemetry.addData("Time", "%.1f / 2.0 seconds", timer.seconds());
-                telemetry.update();
-            }
-
-            // Stop motors
-            stopMotors();
 
             telemetry.addData("Status", "Complete");
             telemetry.update();

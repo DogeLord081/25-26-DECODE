@@ -36,27 +36,6 @@ public class AutoMoveRed extends LinearOpMode {
         waitForStart();
 
         if (opModeIsActive()) {
-            // Move RIGHT at half power for 2 seconds
-            telemetry.addData("Status", "Moving RIGHT");
-            telemetry.update();
-
-            // Strafe right: LF forward, RF backward, LB backward, RB forward
-            leftFront.setPower(0.5);
-            rightFront.setPower(-0.5);
-            leftBack.setPower(-0.5);
-            rightBack.setPower(0.5);
-
-            timer.reset();
-            while (opModeIsActive() && timer.seconds() < 2.0) {
-                telemetry.addData("Status", "Moving RIGHT");
-                telemetry.addData("Time", "%.1f / 2.0 seconds", timer.seconds());
-                telemetry.update();
-            }
-
-            // Stop motors
-            stopMotors();
-            sleep(500);  // Brief pause between movements
-
             // Move LEFT at half power for 2 seconds
             telemetry.addData("Status", "Moving LEFT");
             telemetry.update();

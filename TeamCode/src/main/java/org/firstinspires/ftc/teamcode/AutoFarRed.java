@@ -45,7 +45,7 @@ public class AutoFarRed extends OpMode {
     private VisionPortal visionPortal;
 
     // Shooter constants
-    private static final double TARGET_RPM = 2325.0;
+    private static final double TARGET_RPM = 2335.0;
     private static final double RPM_TOLERANCE_PERCENT = 0.05;  // 5% tolerance
     private static final double SHOOTER_TICKS_PER_REV = 28.0;
     private static final double MAX_SHOOTER_RPM = 4900.0;
@@ -98,7 +98,7 @@ public class AutoFarRed extends OpMode {
     /* Define poses for the autonomous routine - PLACEHOLDER POSITIONS */
     private final Pose startPose = new Pose(0, 0, Math.toRadians(270));  // PLACEHOLDER: Starting position
     private final Pose scanPose = new Pose(0, 30, Math.toRadians(270));  // PLACEHOLDER: Position to scan AprilTag
-    private final Pose shootPose = new Pose(0, 15, Math.toRadians(245));  // PLACEHOLDER: Position to shoot balls
+    private final Pose shootPose = new Pose(0, 15, Math.toRadians(250));  // PLACEHOLDER: Position to shoot balls
     private final Pose endPose = new Pose(30, 0, Math.toRadians(0));  // PLACEHOLDER: Final parking position
 
     /* Path declarations */
@@ -272,7 +272,7 @@ public class AutoFarRed extends OpMode {
         boolean rpmReady = shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
 
         // Determine which side to shoot from using webcam color detection
-        if (!shootSideDecided && shootTimer.milliseconds() > 400) {
+        if (!shootSideDecided && shootTimer.milliseconds() > 750) {
             char targetColor = ballOrder[currentBallIndex];
             boolean isThirdBall = (currentBallIndex == 2);
 

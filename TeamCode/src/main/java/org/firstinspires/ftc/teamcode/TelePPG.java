@@ -268,7 +268,7 @@ public class TelePPG extends OpMode {
         leftHoodAdjustment.setPosition(leftHoodPosition);
         rightHoodAdjustment.setPosition(rightHoodPosition);
 
-        // Initialize trapdoors to closed position (0.2 = closed, 0.0/0.2 = open)
+        // Initialize trapdoors to closed position (left: 0.2 = closed, 0.1 = open, right: 0.0 = closed, 0.1 = open)
         leftTrapdoor.setPosition(0.1);
         rightTrapdoor.setPosition(0.1);
 

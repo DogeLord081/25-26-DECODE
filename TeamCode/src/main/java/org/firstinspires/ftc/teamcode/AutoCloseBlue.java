@@ -46,7 +46,7 @@ public class AutoCloseBlue extends OpMode {
     private VisionPortal visionPortal;
 
     // Shooter constants
-    private static final double TARGET_RPM = 1850.0;
+    private static final double TARGET_RPM = 1800.0;
     private static final double RPM_TOLERANCE_PERCENT = 0.05;  // 5% tolerance
     private static final double SHOOTER_TICKS_PER_REV = 28.0;
     private static final double MAX_SHOOTER_RPM = 4900.0;
@@ -100,12 +100,14 @@ public class AutoCloseBlue extends OpMode {
 
     /* Define poses for the autonomous routine */
     private final Pose startPose = new Pose(26.63157142857142, 127.60802107728338, Math.toRadians(325));
-    private final Pose scorePose = new Pose(52.328, 115.18032786885244, Math.toRadians(250));
-    private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(320));
+    private final Pose scorePose = new Pose(56.328, 115.18032786885244, Math.toRadians(250));
+    private final Pose afterScanPose = new Pose(52.328, 100.18032786885244, Math.toRadians(325));
     private final Pose afterShootPose = new Pose(54.55750819672132, 59, Math.toRadians(160));
-    private final Pose intakeBallsPose = new Pose(24.55750819672132, 59, Math.toRadians(200));
+    private final Pose intakeBallsPose = new Pose(23, 59, Math.toRadians(200));
+    private final Pose intakeBallsPosePart2 = new Pose(21, 59, Math.toRadians(180));
     private final Pose afterShootPose2 = new Pose(54.55750819672132, 38.73770491803278, Math.toRadians(160));
-    private final Pose intakeBallsPose2 = new Pose(24.55750819672132, 35.73770491803278, Math.toRadians(200));
+    private final Pose intakeBallsPose2 = new Pose(23, 38.73770491803278, Math.toRadians(200));
+    private final Pose intakeBallsPose2Part2 = new Pose(21, 38.73770491803278, Math.toRadians(180));
 
     /* Path declarations */
     private Path scorePreload;
@@ -113,7 +115,9 @@ public class AutoCloseBlue extends OpMode {
     private Path afterShootPath;
     private Path afterShootPath2;
     private Path intakeBallsPath;
+    private Path intakeBallsPathPart2;
     private Path intakeBallsPath2;
+    private Path intakeBallsPath2Part2;
     private Path returnToAfterShootPath;
     private Path returnToAfterShootPath2;
     private Path returnToScanPath;
@@ -136,8 +140,11 @@ public class AutoCloseBlue extends OpMode {
         intakeBallsPath = new Path(new BezierLine(afterShootPose, intakeBallsPose));
         intakeBallsPath.setLinearHeadingInterpolation(afterShootPose.getHeading(), intakeBallsPose.getHeading());
 
-        returnToAfterShootPath = new Path(new BezierLine(intakeBallsPose, afterShootPose));
-        returnToAfterShootPath.setLinearHeadingInterpolation(intakeBallsPose.getHeading(), afterShootPose.getHeading());
+        intakeBallsPathPart2 = new Path(new BezierLine(intakeBallsPose, intakeBallsPosePart2));
+        intakeBallsPathPart2.setLinearHeadingInterpolation(intakeBallsPose.getHeading(), intakeBallsPosePart2.getHeading());
+
+        returnToAfterShootPath = new Path(new BezierLine(intakeBallsPosePart2, afterShootPose));
+        returnToAfterShootPath.setLinearHeadingInterpolation(intakeBallsPosePart2.getHeading(), afterShootPose.getHeading());
 
         afterShootPath2 = new Path(new BezierLine(afterScanPose, afterShootPose2));
         afterShootPath2.setLinearHeadingInterpolation(afterScanPose.getHeading(), afterShootPose2.getHeading());
@@ -145,19 +152,22 @@ public class AutoCloseBlue extends OpMode {
         intakeBallsPath2 = new Path(new BezierLine(afterShootPose2, intakeBallsPose2));
         intakeBallsPath2.setLinearHeadingInterpolation(afterShootPose2.getHeading(), intakeBallsPose2.getHeading());
 
+        intakeBallsPath2Part2 = new Path(new BezierLine(intakeBallsPose2, intakeBallsPose2Part2));
+        intakeBallsPath2Part2.setLinearHeadingInterpolation(intakeBallsPose2.getHeading(), intakeBallsPose2Part2.getHeading());
+
         returnToScanPath = new Path(new BezierCurve(
-                afterShootPose,
+                intakeBallsPosePart2,
                 new Pose(55.0, 85.0, 0),
                 afterScanPose
         ));
-        returnToScanPath.setLinearHeadingInterpolation(afterShootPose.getHeading(), afterScanPose.getHeading());
+        returnToScanPath.setLinearHeadingInterpolation(intakeBallsPosePart2.getHeading(), afterScanPose.getHeading());
 
         returnToScanPath2 = new Path(new BezierCurve(
-                afterShootPose2,
+                intakeBallsPose2Part2,
                 new Pose(55.0, 85.0, 0),
                 afterScanPose
         ));
-        returnToScanPath2.setLinearHeadingInterpolation(afterShootPose2.getHeading(), afterScanPose.getHeading());
+        returnToScanPath2.setLinearHeadingInterpolation(intakeBallsPose2Part2.getHeading(), afterScanPose.getHeading());
     }
 
     /** Main state machine for autonomous path progression **/
@@ -267,17 +277,23 @@ public class AutoCloseBlue extends OpMode {
                 if (!follower.isBusy()) {
                     // Turn on intake to pick up balls
                     intake.setPower(-1.0);
-                    // Use slow speed for intake path (half speed)
                     follower.followPath(intakeBallsPath);
                     setPathState(7);
                 }
                 break;
 
             case 7:
-                // Wait for robot to reach intakeBallsPose
+                // Wait for robot to reach intakeBallsPose, then go to Part2
                 if (!follower.isBusy()) {
-                    //intake.setPower(0);
-                    // Reset to normal speed for return trip
+                    // Continue intake and go to Part2
+                    follower.followPath(intakeBallsPathPart2);
+                    setPathState(8);
+                }
+                break;
+
+            case 8:
+                // Wait for robot to reach intakeBallsPosePart2
+                if (!follower.isBusy()) {
                     // Start return trip
                     follower.followPath(returnToAfterShootPath);
 
@@ -289,43 +305,109 @@ public class AutoCloseBlue extends OpMode {
                     ballDetectedWaitingForRpm = false;
                     shootSideDecided = false;
 
-                    setPathState(8);
+                    setPathState(9);
                 }
                 break;
 
-            case 8:
+            case 9:
                 // Traveling back to afterShootPose
                 controlShooterPID();
 
                 if (!follower.isBusy()) {
                     shooter.setPower(0.5);  // Spin up shooter again
                     follower.followPath(returnToScanPath);
-                    setPathState(9);
+                    setPathState(10);
                 }
                 break;
 
-            case 9:
+            case 10:
                 // Traveling back to afterScanPose
                 controlShooterPID();
                 // executeShootSequence();
 
                 if (!follower.isBusy()) {
                     follower.holdPoint(afterScanPose);
-                    setPathState(10);
-                }
-                break;
-
-            case 10:
-                // Round 2 shooting at afterScanPose
-                controlShooterPID();
-                executeShootSequence();
-
-                if (currentBallIndex >= 3) {
                     setPathState(11);
                 }
                 break;
 
             case 11:
+                // Round 2 shooting at afterScanPose
+                controlShooterPID();
+                executeShootSequence();
+
+                if (currentBallIndex >= 3) {
+                    setPathState(12);
+                }
+                break;
+
+            case 12:
+                // Round 2 done, go to afterShootPose2
+                shooter.setPower(0);
+                intake.setPower(0);
+                follower.followPath(afterShootPath2);
+                setPathState(13);
+                break;
+
+            case 13:
+                // Wait for robot to reach afterShootPose2
+                if (!follower.isBusy()) {
+                    // Turn on intake to pick up balls
+                    intake.setPower(-1.0);
+                    follower.followPath(intakeBallsPath2);
+                    setPathState(14);
+                }
+                break;
+
+            case 14:
+                // Wait for robot to reach intakeBallsPose2, then go to Part2
+                if (!follower.isBusy()) {
+                    // Continue intake and go to Part2
+                    follower.followPath(intakeBallsPath2Part2);
+                    setPathState(15);
+                }
+                break;
+
+            case 15:
+                // Wait for robot to reach intakeBallsPose2Part2
+                if (!follower.isBusy()) {
+                    // Start return trip to afterScanPose
+                    follower.followPath(returnToScanPath2);
+
+                    // Reset for third round of shooting
+                    currentBallIndex = 0;
+                    shootTimer.reset();
+                    shotFired = false;
+                    distanceCheckPassed = false;
+                    ballDetectedWaitingForRpm = false;
+                    shootSideDecided = false;
+
+                    setPathState(16);
+                }
+                break;
+
+            case 16:
+                // Traveling back to afterScanPose
+                controlShooterPID();
+
+                if (!follower.isBusy()) {
+                    shooter.setPower(0.5);  // Spin up shooter again
+                    follower.holdPoint(afterScanPose);
+                    setPathState(17);
+                }
+                break;
+
+            case 17:
+                // Round 3 shooting at afterScanPose
+                controlShooterPID();
+                executeShootSequence();
+
+                if (currentBallIndex >= 3) {
+                    setPathState(18);
+                }
+                break;
+
+            case 18:
                 // Final state - stop
                 shooter.setPower(0);
                 intake.setPower(0);
@@ -661,7 +743,7 @@ public class AutoCloseBlue extends OpMode {
         // telemetry.addData("RPM Ready", rpmReady ? "YES" : "NO");
 
         // Shooting sequence status
-        if (pathState == 3 || pathState == 4 || pathState == 9 || pathState == 10) {
+        if (pathState == 3 || pathState == 4 || pathState == 11 || pathState == 17) {
             telemetry.addData("--- SHOOTING ---", "");
             telemetry.addData("Current Ball", currentBallIndex + 1);
             telemetry.addData("Target Color", currentBallIndex < 3 ? (ballOrder[currentBallIndex] == 'P' ? "PURPLE" : "GREEN") : "Done");

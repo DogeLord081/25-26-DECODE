@@ -20,9 +20,9 @@ public class MotorTest extends OpMode {
         rightBack = hardwareMap.get(DcMotor.class, "rightBack");
 
         leftFront.setDirection(DcMotor.Direction.REVERSE);
-        leftBack.setDirection(DcMotor.Direction.REVERSE);
+        leftBack.setDirection(DcMotor.Direction.FORWARD);
         rightFront.setDirection(DcMotor.Direction.FORWARD);
-        rightBack.setDirection(DcMotor.Direction.FORWARD);
+        rightBack.setDirection(DcMotor.Direction.REVERSE);
 
         rightFront.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         rightBack.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
@@ -49,9 +49,9 @@ public class MotorTest extends OpMode {
         leftBack.setPower(0.41 * scaleFactor);      // = 1.0
         rightBack.setPower(0.3125 * scaleFactor);   // = 0.7621951220
          */
-        leftFront.setPower(0.3525 * scaleFactor);   // = 0.8597560976
-        rightFront.setPower(0.35 * scaleFactor);    // = 0.7804878049
-        leftBack.setPower(0.41 * scaleFactor);      // = 1.0
-        rightBack.setPower(0.3425 * scaleFactor);   // = 0.7621951220
+        leftFront.setPower(0.5);   // = 0.8597560976
+        rightFront.setPower(0);    // = 0.7804878049
+        leftBack.setPower(0);      // = 1.0
+        rightBack.setPower(0);   // = 0.7621951220
     }
 }
