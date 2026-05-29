@@ -115,8 +115,8 @@ public class TELEPGP extends OpMode {
     private double shooterLastError = 0.0;
 
     // Hood adjustment positions
-    private double leftHoodPosition = 0.15;
-    private double rightHoodPosition = 0.15;
+    private double leftHoodPosition = 0.3;
+    private double rightHoodPosition = 0.0;
 
     // ========== CONTROLLER 2 (OPERATOR) STATE ==========
     // Trapdoor toggles (Face Buttons)
@@ -148,7 +148,7 @@ public class TELEPGP extends OpMode {
     private boolean lastGamepad2LeftTriggerState = false;
 
     // Minimum shooter RPM when idling (for faster windup)
-    private static final double MIN_IDLE_SHOOTER_RPM = 1800;
+    private static final double MIN_IDLE_SHOOTER_RPM = 2000.0;
 
     // Auto shoot (Right Trigger or Button?) - Image says "Auto shoot". Assuming RT based on position.
     // No toggle needed if it's a sequence trigger, but we need debouncing.
@@ -261,9 +261,9 @@ public class TELEPGP extends OpMode {
         leftHoodAdjustment.setPosition(leftHoodPosition);
         rightHoodAdjustment.setPosition(rightHoodPosition);
 
-        // Initialize trapdoors to closed position (0.2 = closed, 0.0/0.2 = open)
-        leftTrapdoor.setPosition(0.1);
-        rightTrapdoor.setPosition(0.1);
+        // Initialize trapdoors to closed position (left: 0.2 = closed, 0.1 = open, right: 0.0 = closed, 0.1 = open)
+        leftTrapdoor.setPosition(0.2);
+        rightTrapdoor.setPosition(0.0);
 
         // Initialize transfers to down position (DOWN = open = shooting position)
         leftTransfer.setPosition(0.5);
@@ -380,6 +380,7 @@ public class TELEPGP extends OpMode {
                 leftHoodAdjustment.setPosition(leftHoodPosition);
                 double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
                 rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
+                rightHoodPosition = 0.0;
                 rightHoodAdjustment.setPosition(rightHoodPosition);
                 // When auto-aim enabled and tag detected, use full RPM from lookup table
                 // Only set if not in active shoot sequence (let shoot sequence maintain its own target)
@@ -481,45 +482,29 @@ public class TELEPGP extends OpMode {
         // X Button: Left trapdoor toggle
         if (gamepad2.x && !lastGamepad2XState) {
             leftTrapdoorOpen = !leftTrapdoorOpen;
-            if (leftTrapdoorOpen) {
-                leftTrapdoor.setPosition(0.2);  // Open
-                rightTrapdoor.setPosition(0.1);  // Keep right closed
-            } else {
-                leftTrapdoor.setPosition(0.1);  // Closed
-                rightTrapdoor.setPosition(0.1);  // Keep right closed
-            }
+            bothTrapdoorsOpen = false;
         }
         lastGamepad2XState = gamepad2.x;
 
         // B Button: Right trapdoor toggle
         if (gamepad2.b && !lastGamepad2BState) {
             rightTrapdoorOpen = !rightTrapdoorOpen;
-            if (rightTrapdoorOpen) {
-                rightTrapdoor.setPosition(0.0);  // Open
-                leftTrapdoor.setPosition(0.1);  // Keep left closed
-            } else {
-                rightTrapdoor.setPosition(0.1);  // Closed
-                leftTrapdoor.setPosition(0.1);  // Keep left closed
-            }
+            bothTrapdoorsOpen = false;
         }
         lastGamepad2BState = gamepad2.b;
 
-        // Y Button: Open both trapdoors toggle
+        // Y Button: Open/close both trapdoors toggle
         if (gamepad2.y && !lastGamepad2YState) {
             bothTrapdoorsOpen = !bothTrapdoorsOpen;
-            if (bothTrapdoorsOpen) {
-                leftTrapdoor.setPosition(0.2);  // Open
-                rightTrapdoor.setPosition(0.0);  // Open
-                leftTrapdoorOpen = true;
-                rightTrapdoorOpen = true;
-            } else {
-                leftTrapdoor.setPosition(0.1);  // Closed
-                rightTrapdoor.setPosition(0.1);  // Closed
-                leftTrapdoorOpen = false;
-                rightTrapdoorOpen = false;
-            }
+            leftTrapdoorOpen = bothTrapdoorsOpen;
+            rightTrapdoorOpen = bothTrapdoorsOpen;
         }
         lastGamepad2YState = gamepad2.y;
+
+        // Apply trapdoor servo positions every loop based on current state.
+        // Mapping: left closed=0.2/open=0.1, right closed=0.0/open=0.1
+        leftTrapdoor.setPosition(leftTrapdoorOpen ? 0.1 : 0.2);
+        rightTrapdoor.setPosition(rightTrapdoorOpen ? 0.1 : 0.0);
 
         // A Button: Transfer toggle (UP = closed, DOWN = open)
         if (gamepad2.a && !lastGamepad2AState) {
@@ -564,8 +549,9 @@ public class TELEPGP extends OpMode {
                     leftHoodAdjustment.setPosition(leftHoodPosition);
                     double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
                     rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
+                    rightHoodPosition = 0.0;
                     rightHoodAdjustment.setPosition(rightHoodPosition);
-                    targetShooterRPM = 1800.0;
+                    targetShooterRPM = 2000.0;
                 }
                 startShootSequence();
             }
@@ -584,8 +570,9 @@ public class TELEPGP extends OpMode {
                     leftHoodAdjustment.setPosition(leftHoodPosition);
                     double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
                     rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
+                    rightHoodPosition = 0.0;
                     rightHoodAdjustment.setPosition(rightHoodPosition);
-                    targetShooterRPM = 1800.0;
+                    targetShooterRPM = 2000.0;
                 }
                 startShootSequence();
             }
@@ -885,20 +872,20 @@ public class TELEPGP extends OpMode {
 
         if (kickLeft && kickRight && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
             // Both trapdoors open
-            leftTrapdoor.setPosition(0.2);   // Open
-            rightTrapdoor.setPosition(0.0);  // Open
+            leftTrapdoor.setPosition(0.1);   // Open
+            rightTrapdoor.setPosition(0.1);  // Open
         } else if (kickRight && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
             // Left Trapdoor Open
-            leftTrapdoor.setPosition(0.2);   // Open
-            rightTrapdoor.setPosition(0.2);  // Closed
+            leftTrapdoor.setPosition(0.1);   // Open
+            rightTrapdoor.setPosition(0.1);  // Closed
         } else if (kickLeft && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
             // Right Trapdoor Open
-            leftTrapdoor.setPosition(0.0);   // Closed
+            leftTrapdoor.setPosition(0.2);   // Closed
             rightTrapdoor.setPosition(0.0);  // Open
         } else {
             // No selection or ball already detected, ensure closed
-            leftTrapdoor.setPosition(0.1);   // Closed
-            rightTrapdoor.setPosition(0.1);  // Closed
+            leftTrapdoor.setPosition(0.2);   // Closed
+            rightTrapdoor.setPosition(0.0);  // Closed
         }
 
         // Set transfer to down (open) position for shooting
@@ -916,6 +903,24 @@ public class TELEPGP extends OpMode {
         double rpmLowerBound = targetShooterRPM * (1.0 - RPM_TOLERANCE_PERCENT);
         double rpmUpperBound = targetShooterRPM * (1.0 + RPM_TOLERANCE_PERCENT);
         boolean rpmReady = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
+
+        // Operator override: if a ball is detected and we're waiting for RPM, allow gamepad2 A to feed early.
+        // Note: gamepad2.a is already used as a transfer toggle in the main loop, but that toggle gets overridden by the shoot sequence.
+        if (ballDetectedWaitingForRpm && !rpmReady && (gamepad2.a && !lastGamepad2AState)) {
+            // Treat this like "distance check passed" so the rest of the state machine proceeds.
+            distanceCheckPassed = true;
+            ballDetectedWaitingForRpm = false;
+
+            // Immediately move transfer UP (to bring ball to flywheel)
+            leftTransfer.setPosition(0.0);   // UP position
+            rightTransfer.setPosition(0.5);  // UP position
+            transfersUp = true;
+
+            // Spin intake forward to push ball up
+            intake.setPower(-1.0);
+            intakeReversed = false;
+            transferTimer.reset();
+        }
 
         // Handle restart intake pulse completion (after 100ms, set intake back to -1.0 and transfers down)
         if (restartIntakePulseActive && restartIntakePulseTimer.milliseconds() >= 150) {
@@ -944,8 +949,8 @@ public class TELEPGP extends OpMode {
             // Ball detected - close trapdoors immediately (regardless of RPM)
             if (distance < 20 && !ballDetectedWaitingForRpm) {
                 // Close both trapdoors immediately
-                leftTrapdoor.setPosition(0.1);   // Closed
-                rightTrapdoor.setPosition(0.1);  // Closed
+                leftTrapdoor.setPosition(0.2);   // Closed
+                rightTrapdoor.setPosition(0.0);  // Closed
                 leftTrapdoorOpen = false;
                 rightTrapdoorOpen = false;
                 bothTrapdoorsOpen = false;
@@ -991,8 +996,8 @@ public class TELEPGP extends OpMode {
 
         // End sequence 1 second after firing
         if (shotFired && shotFiredTimer.milliseconds() >= 750) {
-            leftTrapdoor.setPosition(0.1);   // Closed
-            rightTrapdoor.setPosition(0.1);  // Closed
+            leftTrapdoor.setPosition(0.2);   // Closed
+            rightTrapdoor.setPosition(0.0);  // Closed
             leftKickerArm.setPosition(0.0);
             rightKickerArm.setPosition(0.5);
             leftTransfer.setPosition(0.5);   // DOWN position
@@ -1032,8 +1037,8 @@ public class TELEPGP extends OpMode {
         trapdoorsOpenedForSingleBall = false;
 
         // Reset servos to closed positions
-        leftTrapdoor.setPosition(0.1);
-        rightTrapdoor.setPosition(0.1);
+        leftTrapdoor.setPosition(0.2);
+        rightTrapdoor.setPosition(0.0);
         rightTransfer.setPosition(0.0);  // DOWN position
         leftTransfer.setPosition(0.5);   // DOWN position
 
@@ -1063,24 +1068,24 @@ public class TELEPGP extends OpMode {
 
         // Check if both sides should be kicked (both trapdoors open)
         if (kickLeft && kickRight) {
-            leftTrapdoor.setPosition(0.2);  // Open
-            rightTrapdoor.setPosition(0.0);  // Open
+            leftTrapdoor.setPosition(0.1);  // Open
+            rightTrapdoor.setPosition(0.1);  // Open
         } else if (singleBallMode) {
             // Single ball mode: open only left trapdoor
-            leftTrapdoor.setPosition(0.2);  // Open
-            rightTrapdoor.setPosition(0.1);  // Closed
+            leftTrapdoor.setPosition(0.1);  // Open
+            rightTrapdoor.setPosition(0.2);  // Closed
         } else if (kickLeft) {
             // Left side only (prioritized when both match)
-            leftTrapdoor.setPosition(0.2);  // Open
-            rightTrapdoor.setPosition(0.1);  // Closed
+            leftTrapdoor.setPosition(0.1);  // Open
+            rightTrapdoor.setPosition(0.2);  // Closed
         } else if (kickRight) {
             // Right side
-            rightTrapdoor.setPosition(0.1);  // Closed
-            leftTrapdoor.setPosition(0.0);  // Open
+            rightTrapdoor.setPosition(0.2);  // Closed
+            leftTrapdoor.setPosition(0.1);  // Open
         } else {
             // No match or ball already detected - ensure closed
-            leftTrapdoor.setPosition(0.1);  // Closed
-            rightTrapdoor.setPosition(0.1);  // Closed
+            leftTrapdoor.setPosition(0.2);  // Closed
+            rightTrapdoor.setPosition(0.0);  // Closed
         }
 
         // Start intake pulse - spin forward to help ball drop
@@ -1120,8 +1125,9 @@ public class TELEPGP extends OpMode {
             leftHoodAdjustment.setPosition(leftHoodPosition);
             double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
             rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
+            rightHoodPosition = 0.0;
             rightHoodAdjustment.setPosition(rightHoodPosition);
-            targetShooterRPM = 1800.0;
+            targetShooterRPM = 2000.0;
         }
 
         // Initialize currentTargetRPM to normal shooting RPM
@@ -1133,8 +1139,8 @@ public class TELEPGP extends OpMode {
         transfersUp = false;
 
         // Reset kicker arms
-        leftTrapdoor.setPosition(0.1);
-        rightTrapdoor.setPosition(0.1);
+        leftTrapdoor.setPosition(0.2);
+        rightTrapdoor.setPosition(0.0);
     }
 
     /**
@@ -1282,27 +1288,27 @@ public class TELEPGP extends OpMode {
             // Open appropriate trapdoor
             // Open appropriate trapdoor (only if ball not yet detected)
             if (kickLeft && kickRight && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
-                leftTrapdoor.setPosition(0.2);   // Open
-                rightTrapdoor.setPosition(0.0);  // Open
+                leftTrapdoor.setPosition(0.1);   // Open
+                rightTrapdoor.setPosition(0.1);  // Open
                 bothTrapdoorsOpen = true;
                 leftTrapdoorOpen = true;
                 rightTrapdoorOpen = true;
             } else if (kickLeft && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
                 // Ball is on LEFT side, open RIGHT trapdoor
-                leftTrapdoor.setPosition(0.0);   // Closed
+                leftTrapdoor.setPosition(0.2);   // Closed
                 rightTrapdoor.setPosition(0.0);  // Open
                 leftTrapdoorOpen = false;
                 rightTrapdoorOpen = true;
             } else if (kickRight && !ballDetectedWaitingForRpm && !distanceCheckPassed) {
                 // Ball is on RIGHT side, open LEFT trapdoor
-                leftTrapdoor.setPosition(0.2);   // Open
-                rightTrapdoor.setPosition(0.2);  // Closed
+                leftTrapdoor.setPosition(0.1);   // Open
+                rightTrapdoor.setPosition(0.1);  // Closed
                 leftTrapdoorOpen = true;
                 rightTrapdoorOpen = false;
             } else {
                 // Ball already detected - keep closed
-                leftTrapdoor.setPosition(0.1);   // Closed
-                rightTrapdoor.setPosition(0.1);  // Closed
+                leftTrapdoor.setPosition(0.2);   // Closed
+                rightTrapdoor.setPosition(0.0);  // Closed
                 leftTrapdoorOpen = false;
                 rightTrapdoorOpen = false;
                 bothTrapdoorsOpen = false;
@@ -1341,8 +1347,8 @@ public class TELEPGP extends OpMode {
             // Ball detected - close trapdoors immediately (regardless of RPM)
             if (distance < 25 && !ballDetectedWaitingForRpm) {
                 // Close both trapdoors
-                leftTrapdoor.setPosition(0.1);
-                rightTrapdoor.setPosition(0.1);
+                leftTrapdoor.setPosition(0.2);
+                rightTrapdoor.setPosition(0.0);
                 leftTrapdoorOpen = false;
                 rightTrapdoorOpen = false;
                 bothTrapdoorsOpen = false;
@@ -1389,8 +1395,8 @@ public class TELEPGP extends OpMode {
         // (1300ms allows transfers to fully go up and come back down before next trapdoor opens)
         if (shotFired && shotFiredTimer.milliseconds() >= 750) {
             // Close trapdoors and reset kicker arms
-            leftTrapdoor.setPosition(0.1);
-            rightTrapdoor.setPosition(0.1);
+            leftTrapdoor.setPosition(0.2);
+            rightTrapdoor.setPosition(0.0);
             leftKickerArm.setPosition(0.0);
             rightKickerArm.setPosition(0.5);
 
@@ -1433,17 +1439,17 @@ public class TELEPGP extends OpMode {
         // Reopen trapdoors based on current kick settings
 // CRITICAL: Only reopen if we haven't already detected a ball
         if (kickLeft && kickRight) {
-            leftTrapdoor.setPosition(0.2);
-            rightTrapdoor.setPosition(0.0);
-        } else if (kickLeft) {
-            leftTrapdoor.setPosition(0.0);
-            rightTrapdoor.setPosition(0.0);
-        } else if (kickRight) {
-            leftTrapdoor.setPosition(0.2);
-            rightTrapdoor.setPosition(0.2);
-        } else {
             leftTrapdoor.setPosition(0.1);
             rightTrapdoor.setPosition(0.1);
+        } else if (kickLeft) {
+            leftTrapdoor.setPosition(0.2);
+            rightTrapdoor.setPosition(0.0);
+        } else if (kickRight) {
+            leftTrapdoor.setPosition(0.1);
+            rightTrapdoor.setPosition(0.1);
+        } else {
+            leftTrapdoor.setPosition(0.2);
+            rightTrapdoor.setPosition(0.0);
         }
 
         // Start intake pulse
@@ -1475,8 +1481,8 @@ public class TELEPGP extends OpMode {
         waitingForTransferCycle = false;
 
         // Reset servos to closed positions
-        leftTrapdoor.setPosition(0.1);
-        rightTrapdoor.setPosition(0.1);
+        leftTrapdoor.setPosition(0.2);
+        rightTrapdoor.setPosition(0.0);
         rightTransfer.setPosition(0.0);  // DOWN position
         leftTransfer.setPosition(0.5);   // DOWN position
 
@@ -1579,5 +1585,4 @@ public class TELEPGP extends OpMode {
         return 0.75;  // Default to center-ish
     }
 }
-
 

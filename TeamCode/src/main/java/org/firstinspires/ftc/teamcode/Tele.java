@@ -927,6 +927,24 @@ public class Tele extends OpMode {
         double rpmUpperBound = targetShooterRPM * (1.0 + RPM_TOLERANCE_PERCENT);
         boolean rpmReady = targetShooterRPM > 0 && shooterRPM >= rpmLowerBound && shooterRPM <= rpmUpperBound;
 
+        // Operator override: if a ball is detected and we're waiting for RPM, allow gamepad2 A to feed early.
+        // Note: gamepad2.a is already used as a transfer toggle in the main loop, but that toggle gets overridden by the shoot sequence.
+        if (ballDetectedWaitingForRpm && !rpmReady && (gamepad2.a && !lastGamepad2AState)) {
+            // Treat this like "distance check passed" so the rest of the state machine proceeds.
+            distanceCheckPassed = true;
+            ballDetectedWaitingForRpm = false;
+
+            // Immediately move transfer UP (to bring ball to flywheel)
+            leftTransfer.setPosition(0.0);   // UP position
+            rightTransfer.setPosition(0.5);  // UP position
+            transfersUp = true;
+
+            // Spin intake forward to push ball up
+            intake.setPower(-1.0);
+            intakeReversed = false;
+            transferTimer.reset();
+        }
+
         // Handle restart intake pulse completion (after 100ms, set intake back to -1.0 and transfers down)
         if (restartIntakePulseActive && restartIntakePulseTimer.milliseconds() >= 150) {
             intake.setPower(-1.0);
@@ -1583,5 +1601,4 @@ public class Tele extends OpMode {
         return 0.75;  // Default to center-ish
     }
 }
-
 
