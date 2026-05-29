@@ -377,6 +377,7 @@ public class TELEPGP extends OpMode {
 
             // Apply hood positions and set target RPM when auto-aim is enabled and looking at tag
             if (autoAimEnabled) {
+                leftHoodPosition = 0.3;
                 leftHoodAdjustment.setPosition(leftHoodPosition);
                 double rightHoodCalc = 0.25 - ((leftHoodPosition - 0.05) / (0.3 - 0.05)) * (0.25 - 0.0);
                 rightHoodPosition = Range.clip(rightHoodCalc, 0.0, 0.25);
